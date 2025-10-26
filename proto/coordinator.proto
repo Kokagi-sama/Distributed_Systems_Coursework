@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package coordinator;
+
+service Coordinator {
+    rpc RequestWork(WorkRequest) returns (WorkResponse);
+    rpc SubmitPrimes(SubmitRequest) returns (SubmitResponse);
+    rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+message WorkRequest {
+    string client_id = 1;
+}
+
+message WorkResponse {
+    bool has_work = 1;
+    int32 chunk_id = 2;
+    string filename = 3;
+    int64 start_line = 4;
+    int64 end_line = 5;
+    string fileserver_address = 6;
+}
+
+message SubmitRequest {
+    string client_id = 1;
+    int32 chunk_id = 2;
+    repeated uint64 primes = 3;
+}
+
+message SubmitResponse {
+    bool success = 1;
+}
+
+message HeartbeatRequest {
+    string client_id = 1;
+}
+
+message HeartbeatResponse {
+    bool acknowledged = 1;
+}

@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package fileserver;
+
+service FileServer {
+    rpc FetchFile(FetchRequest) returns (FetchResponse);
+}
+
+message FetchRequest {
+    string filename = 1;
+}
+
+message FetchResponse {
+    bool success = 1;
+    bytes file_data = 2;
+    string error_message = 3;
+}
