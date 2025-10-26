@@ -1,0 +1,9 @@
+syntax = "proto3";
+package afs;
+
+message OpenReq { string path = 1; string mode = 2; }
+message OpenResp { string file_id = 1; int64 version = 2; }
+
+service FileService {
+  rpc Open(OpenReq) returns (OpenResp);
+}
