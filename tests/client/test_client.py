@@ -46,23 +46,23 @@ def test_process_file(temp_test_file):
     assert 31 in primes
 
 
-def test_request_work_with_mock():
-    """Test RequestWork RPC with mock coordinator."""
+def test_request_task_with_mock():
+    """Test RequestTask RPC with mock coordinator."""
     client = Client("test-client", "localhost:50051")
 
-    mock_response = coordinator_pb2.WorkResponse(
-        has_work=True,
+    mock_response = coordinator_pb2.TaskResponse(
+        has_task=True,
         filename="test.txt",
         fileserver_address="localhost:50052",
     )
-    client.coordinator.RequestWork = Mock(return_value=mock_response)
+    client.coordinator.RequestTask = Mock(return_value=mock_response)
 
-    request = coordinator_pb2.WorkRequest(client_id=client.client_id)
-    work = client.coordinator.RequestWork(request)
+    request = coordinator_pb2.TaskRequest(client_id=client.client_id)
+    task = client.coordinator.RequestTask(request)
 
-    assert work.has_work is True
-    assert work.filename == "test.txt"
-    assert work.fileserver_address == "localhost:50052"
+    assert task.has_task is True
+    assert task.filename == "test.txt"
+    assert task.fileserver_address == "localhost:50052"
 
 
 def test_submit_primes_with_mock():
@@ -80,17 +80,17 @@ def test_submit_primes_with_mock():
     assert response.success is True
 
 
-def test_no_work_available():
-    """Test handling when coordinator has no work."""
+def test_no_task_available():
+    """Test handling when coordinator has no tasks."""
     client = Client("test-client", "localhost:50051")
 
-    mock_response = coordinator_pb2.WorkResponse(has_work=False)
-    client.coordinator.RequestWork = Mock(return_value=mock_response)
+    mock_response = coordinator_pb2.TaskResponse(has_task=False)
+    client.coordinator.RequestTask = Mock(return_value=mock_response)
 
-    request = coordinator_pb2.WorkRequest(client_id=client.client_id)
-    work = client.coordinator.RequestWork(request)
+    request = coordinator_pb2.TaskRequest(client_id=client.client_id)
+    task = client.coordinator.RequestTask(request)
 
-    assert work.has_work is False
+    assert task.has_task is False
 
 
 def test_heartbeat_with_mock():

@@ -135,45 +135,45 @@ class Client:
             self.heartbeat_thread.join(timeout=self.heartbeat_interval + 1)
 
     def run(self):
-        """Main loop: request work, process file, submit result."""
+        """Main loop: request task, process file, submit result."""
         print(f"[{self.client_id}] Started")
 
         # Start heartbeat thread
         self._start_heartbeat()
 
-        no_work_attempts = 0
-        max_no_work_attempts = 3
+        no_task_attempts = 0
+        max_no_task_attempts = 3
 
         while True:
             try:
-                # Request work from coordinator
-                print(f"[{self.client_id}] Requesting work from coordinator")
-                request = coordinator_pb2.WorkRequest(client_id=self.client_id)
-                work = self.coordinator.RequestWork(request)
+                # Request task from coordinator
+                print(f"[{self.client_id}] Requesting task from coordinator")
+                request = coordinator_pb2.TaskRequest(client_id=self.client_id)
+                task = self.coordinator.RequestTask(request)
 
-                if not work.has_work:
-                    no_work_attempts += 1
-                    if no_work_attempts >= max_no_work_attempts:
+                if not task.has_task:
+                    no_task_attempts += 1
+                    if no_task_attempts >= max_no_task_attempts:
                         print(
-                            f"[{self.client_id}] Info: No work available after {max_no_work_attempts} attempts"
+                            f"[{self.client_id}] Info: No tasks available after {max_no_task_attempts} attempts"
                         )
                         break
-                    print(f"[{self.client_id}] Info: No work available")
+                    print(f"[{self.client_id}] Info: No tasks available")
                     time.sleep(5)
                     continue
 
-                no_work_attempts = 0
+                no_task_attempts = 0
 
-                print(f"[{self.client_id}] Received work from coordinator")
-                print(f"[{self.client_id}] Work details:")
-                print(f"[{self.client_id}]   File: {work.filename}")
-                print(f"[{self.client_id}]   File server: {work.fileserver_address}")
+                print(f"[{self.client_id}] Received task from coordinator")
+                print(f"[{self.client_id}] Task details:")
+                print(f"[{self.client_id}]   File: {task.filename}")
+                print(f"[{self.client_id}]   File server: {task.fileserver_address}")
 
                 # Process entire file
                 start_time = time.time()
                 primes = self.process_file(
-                    work.filename,
-                    work.fileserver_address,
+                    task.filename,
+                    task.fileserver_address,
                 )
                 elapsed = time.time() - start_time
 
@@ -184,7 +184,7 @@ class Client:
                 # Submit result back
                 print(f"[{self.client_id}] Submitting result to coordinator")
                 submit_request = coordinator_pb2.SubmitRequest(
-                    client_id=self.client_id, filename=work.filename, primes=primes
+                    client_id=self.client_id, filename=task.filename, primes=primes
                 )
                 response = self.coordinator.SubmitPrimes(submit_request)
 

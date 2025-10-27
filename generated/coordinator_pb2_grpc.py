@@ -34,10 +34,10 @@ class CoordinatorStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.RequestWork = channel.unary_unary(
-                '/coordinator.Coordinator/RequestWork',
-                request_serializer=coordinator__pb2.WorkRequest.SerializeToString,
-                response_deserializer=coordinator__pb2.WorkResponse.FromString,
+        self.RequestTask = channel.unary_unary(
+                '/coordinator.Coordinator/RequestTask',
+                request_serializer=coordinator__pb2.TaskRequest.SerializeToString,
+                response_deserializer=coordinator__pb2.TaskResponse.FromString,
                 _registered_method=True)
         self.SubmitPrimes = channel.unary_unary(
                 '/coordinator.Coordinator/SubmitPrimes',
@@ -54,7 +54,7 @@ class CoordinatorStub(object):
 class CoordinatorServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def RequestWork(self, request, context):
+    def RequestTask(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -75,10 +75,10 @@ class CoordinatorServicer(object):
 
 def add_CoordinatorServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'RequestWork': grpc.unary_unary_rpc_method_handler(
-                    servicer.RequestWork,
-                    request_deserializer=coordinator__pb2.WorkRequest.FromString,
-                    response_serializer=coordinator__pb2.WorkResponse.SerializeToString,
+            'RequestTask': grpc.unary_unary_rpc_method_handler(
+                    servicer.RequestTask,
+                    request_deserializer=coordinator__pb2.TaskRequest.FromString,
+                    response_serializer=coordinator__pb2.TaskResponse.SerializeToString,
             ),
             'SubmitPrimes': grpc.unary_unary_rpc_method_handler(
                     servicer.SubmitPrimes,
@@ -102,7 +102,7 @@ class Coordinator(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def RequestWork(request,
+    def RequestTask(request,
             target,
             options=(),
             channel_credentials=None,
@@ -115,9 +115,9 @@ class Coordinator(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/coordinator.Coordinator/RequestWork',
-            coordinator__pb2.WorkRequest.SerializeToString,
-            coordinator__pb2.WorkResponse.FromString,
+            '/coordinator.Coordinator/RequestTask',
+            coordinator__pb2.TaskRequest.SerializeToString,
+            coordinator__pb2.TaskResponse.FromString,
             options,
             channel_credentials,
             insecure,

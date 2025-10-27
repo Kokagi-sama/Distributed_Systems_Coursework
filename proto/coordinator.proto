@@ -3,17 +3,17 @@ syntax = "proto3";
 package coordinator;
 
 service Coordinator {
-    rpc RequestWork(WorkRequest) returns (WorkResponse);
+    rpc RequestTask(TaskRequest) returns (TaskResponse);
     rpc SubmitPrimes(SubmitRequest) returns (SubmitResponse);
     rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
 
-message WorkRequest {
+message TaskRequest {
     string client_id = 1;
 }
 
-message WorkResponse {
-    bool has_work = 1;
+message TaskResponse {
+    bool has_task = 1;
     string filename = 2;
     string fileserver_address = 3;
 }
