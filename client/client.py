@@ -71,10 +71,8 @@ class Client:
         print(f"[{self.client_id}] Cached {filename} locally")
         return cached_path
 
-    def process_chunk(
-        self, filename: str, start_line: int, end_line: int, fileserver_address: str
-    ) -> list[int]:
-        """Read file chunk and return prime numbers found."""
+    def process_file(self, filename: str, fileserver_address: str) -> list[int]:
+        """Process entire file and return all prime numbers found."""
         primes = []
 
         try:
@@ -83,19 +81,11 @@ class Client:
             print(f"[{self.client_id}] Error: {e}")
             return primes
 
-        print(f"[{self.client_id}] Processing chunk started")
+        print(f"[{self.client_id}] Processing file started")
 
         with open(filepath, "r") as f:
-            # Skip to the chunk start
-            for _ in range(start_line):
-                f.readline()
-
-            # Check each line in range for primes
-            for line_num in range(start_line, end_line):
-                line = f.readline()
-                if not line:
-                    break
-
+            # Process all lines in file
+            for line_num, line in enumerate(f):
                 line = line.strip()
                 if not line:
                     continue
@@ -110,7 +100,7 @@ class Client:
                     )
                     continue
 
-        print(f"[{self.client_id}] Processing chunk finished")
+        print(f"[{self.client_id}] Processing file finished")
         return primes
 
     def _heartbeat_loop(self):
@@ -145,7 +135,7 @@ class Client:
             self.heartbeat_thread.join(timeout=self.heartbeat_interval + 1)
 
     def run(self):
-        """Main loop: request work, process chunk, submit result."""
+        """Main loop: request work, process file, submit result."""
         print(f"[{self.client_id}] Started")
 
         # Start heartbeat thread
@@ -176,29 +166,25 @@ class Client:
 
                 print(f"[{self.client_id}] Received work from coordinator")
                 print(f"[{self.client_id}] Work details:")
-                print(f"[{self.client_id}]   Chunk ID: {work.chunk_id}")
                 print(f"[{self.client_id}]   File: {work.filename}")
-                print(f"[{self.client_id}]   Lines: {work.start_line}-{work.end_line}")
                 print(f"[{self.client_id}]   File server: {work.fileserver_address}")
 
-                # Process assigned chunk
+                # Process entire file
                 start_time = time.time()
-                primes = self.process_chunk(
+                primes = self.process_file(
                     work.filename,
-                    work.start_line,
-                    work.end_line,
                     work.fileserver_address,
                 )
                 elapsed = time.time() - start_time
 
                 print(
-                    f"[{self.client_id}] Processing result: Found {len(primes)} primes in {elapsed:.2f}s"
+                    f"[{self.client_id}] Processing result: Found {len(primes):,} primes in {elapsed:.2f}s"
                 )
 
                 # Submit result back
                 print(f"[{self.client_id}] Submitting result to coordinator")
                 submit_request = coordinator_pb2.SubmitRequest(
-                    client_id=self.client_id, chunk_id=work.chunk_id, primes=primes
+                    client_id=self.client_id, filename=work.filename, primes=primes
                 )
                 response = self.coordinator.SubmitPrimes(submit_request)
 

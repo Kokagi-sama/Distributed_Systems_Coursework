@@ -21,8 +21,8 @@ def test_client_initialization():
     assert client.cache_dir.exists()
 
 
-def test_process_chunk(temp_test_file):
-    """Test processing chunk with mock file server."""
+def test_process_file(temp_test_file):
+    """Test processing entire file with mock file server."""
     client = Client("test-client", "localhost:50051")
 
     file_content = temp_test_file.read_bytes()
@@ -36,14 +36,14 @@ def test_process_chunk(temp_test_file):
         with patch(
             "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
         ):
-            primes = client.process_chunk(
-                str(temp_test_file.name), 0, 8, "localhost:50052"
-            )
+            primes = client.process_file(str(temp_test_file.name), "localhost:50052")
 
-    assert len(primes) == 3
+    assert len(primes) == 5
     assert 17 in primes
     assert 19 in primes
     assert 23 in primes
+    assert 29 in primes
+    assert 31 in primes
 
 
 def test_request_work_with_mock():
@@ -52,10 +52,7 @@ def test_request_work_with_mock():
 
     mock_response = coordinator_pb2.WorkResponse(
         has_work=True,
-        chunk_id=1,
         filename="test.txt",
-        start_line=0,
-        end_line=100,
         fileserver_address="localhost:50052",
     )
     client.coordinator.RequestWork = Mock(return_value=mock_response)
@@ -64,10 +61,7 @@ def test_request_work_with_mock():
     work = client.coordinator.RequestWork(request)
 
     assert work.has_work is True
-    assert work.chunk_id == 1
     assert work.filename == "test.txt"
-    assert work.start_line == 0
-    assert work.end_line == 100
     assert work.fileserver_address == "localhost:50052"
 
 
@@ -79,7 +73,7 @@ def test_submit_primes_with_mock():
     client.coordinator.SubmitPrimes = Mock(return_value=mock_response)
 
     submit_request = coordinator_pb2.SubmitRequest(
-        client_id=client.client_id, chunk_id=1, primes=[2, 3, 5, 7]
+        client_id=client.client_id, filename="test.txt", primes=[2, 3, 5, 7]
     )
     response = client.coordinator.SubmitPrimes(submit_request)
 
