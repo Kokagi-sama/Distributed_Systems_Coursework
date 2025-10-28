@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x66ileserver.proto\x12\nfileserver\" \n\x0c\x46\x65tchRequest\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\"J\n\rFetchResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x11\n\tfile_data\x18\x02 \x01(\x0c\x12\x15\n\rerror_message\x18\x03 \x01(\t2N\n\nFileServer\x12@\n\tFetchFile\x12\x18.fileserver.FetchRequest\x1a\x19.fileserver.FetchResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x66ileserver.proto\x12\nfileserver\" \n\x0c\x46\x65tchRequest\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\"J\n\rFetchResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x11\n\tfile_data\x18\x02 \x01(\x0c\x12\x15\n\rerror_message\x18\x03 \x01(\t\"4\n\rUploadRequest\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x11\n\tfile_data\x18\x02 \x01(\x0c\"8\n\x0eUploadResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rerror_message\x18\x02 \x01(\t2\x93\x01\n\nFileServer\x12@\n\tFetchFile\x12\x18.fileserver.FetchRequest\x1a\x19.fileserver.FetchResponse\x12\x43\n\nUploadFile\x12\x19.fileserver.UploadRequest\x1a\x1a.fileserver.UploadResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,6 +35,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_FETCHREQUEST']._serialized_end=64
   _globals['_FETCHRESPONSE']._serialized_start=66
   _globals['_FETCHRESPONSE']._serialized_end=140
-  _globals['_FILESERVER']._serialized_start=142
-  _globals['_FILESERVER']._serialized_end=220
+  _globals['_UPLOADREQUEST']._serialized_start=142
+  _globals['_UPLOADREQUEST']._serialized_end=194
+  _globals['_UPLOADRESPONSE']._serialized_start=196
+  _globals['_UPLOADRESPONSE']._serialized_end=252
+  _globals['_FILESERVER']._serialized_start=255
+  _globals['_FILESERVER']._serialized_end=402
 # @@protoc_insertion_point(module_scope)

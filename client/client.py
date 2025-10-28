@@ -39,18 +39,18 @@ class Client:
         print(f"[{client_id}] Cache directory: {self.cache_dir}")
 
     def _fetch_file(self, filename: str, fileserver_address: str) -> Path:
-        """Fetch file from server and cache locally."""
-        # Check if already cached
+        """Fetch file from file server and cache it locally."""
+        # Return cached version if available
         if filename in self.cached_files:
-            print(f"[{self.client_id}] Using cached {filename}")
+            print(f"[{self.client_id}] Using cached version of {filename}")
             return self.cached_files[filename]
 
-        # Connect to assigned file server
+        # Connect to file server
         print(f"[{self.client_id}] Fetching {filename} from {fileserver_address}")
         fileserver_channel = grpc.insecure_channel(fileserver_address)
         fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
 
-        # Fetch from file server
+        # Request file via RPC
         request = fileserver_pb2.FetchRequest(filename=filename)
         response = fileserver_stub.FetchFile(request)
 
@@ -60,10 +60,10 @@ class Client:
             )
 
         print(
-            f"[{self.client_id}] Fetched {filename} successfully from {fileserver_address}"
+            f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}"
         )
 
-        # Write to local cache
+        # Save to local cache
         cached_path = self.cache_dir / Path(filename).name
         cached_path.write_bytes(response.file_data)
 
@@ -71,20 +71,54 @@ class Client:
         print(f"[{self.client_id}] Cached {filename} locally")
         return cached_path
 
-    def process_file(self, filename: str, fileserver_address: str) -> list[int]:
-        """Process entire file and return all prime numbers found."""
-        primes = []
+    def _upload_file(
+        self, local_filepath: Path, remote_filename: str, fileserver_address: str
+    ) -> bool:
+        """Upload file to file server."""
+        print(f"[{self.client_id}] Uploading {remote_filename} to {fileserver_address}")
 
         try:
+            # Read local file data
+            file_data = local_filepath.read_bytes()
+
+            # Connect to file server
+            fileserver_channel = grpc.insecure_channel(fileserver_address)
+            fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
+
+            # Upload file via RPC
+            request = fileserver_pb2.UploadRequest(
+                filename=remote_filename, file_data=file_data
+            )
+            response = fileserver_stub.UploadFile(request)
+
+            if not response.success:
+                print(f"[{self.client_id}] Upload failed: {response.error_message}")
+                return False
+
+            print(
+                f"[{self.client_id}] Successfully uploaded {remote_filename} to {fileserver_address}"
+            )
+            return True
+
+        except Exception as e:
+            print(f"[{self.client_id}] Upload error: {e}")
+            return False
+
+    def process_file(self, filename: str, fileserver_address: str) -> bool:
+        """Process file to find primes, deduplicate, and upload result to file server."""
+        try:
+            # Get input file
             filepath = self._fetch_file(filename, fileserver_address)
         except FileNotFoundError as e:
             print(f"[{self.client_id}] Error: {e}")
-            return primes
+            return False
 
-        print(f"[{self.client_id}] Processing file started")
+        print(f"[{self.client_id}] Started processing {filename}")
+
+        # Find and deduplicate primes
+        primes = set()
 
         with open(filepath, "r") as f:
-            # Process all lines in file
             for line_num, line in enumerate(f):
                 line = line.strip()
                 if not line:
@@ -93,15 +127,89 @@ class Client:
                 try:
                     num = int(line)
                     if isprime(num):
-                        primes.append(num)
+                        primes.add(num)
                 except ValueError:
                     print(
-                        f"[{self.client_id}] Warning: Invalid number on line {line_num}: {line}"
+                        f"[{self.client_id}] Warning: Invalid number on line {line_num + 1}: {line}"
                     )
                     continue
 
-        print(f"[{self.client_id}] Processing file finished")
-        return primes
+        print(
+            f"[{self.client_id}] Finished processing: found {len(primes):,} unique primes"
+        )
+
+        # Write sorted primes to local file
+        result_filename = f"{Path(filename).stem}_primes.txt"
+        result_path = self.cache_dir / result_filename
+
+        with open(result_path, "w") as f:
+            for prime in sorted(primes):
+                f.write(f"{prime}\n")
+
+        print(f"[{self.client_id}] Wrote deduplicated primes to {result_filename}")
+
+        # Upload result to file server
+        success = self._upload_file(result_path, result_filename, fileserver_address)
+
+        # Delete local file only if upload succeeded
+        if success:
+            result_path.unlink()
+            print(f"[{self.client_id}] Deleted local {result_filename}")
+
+        return success
+
+    def merge_files(
+        self, file1: str, file2: str, task_id: str, fileserver_address: str
+    ) -> bool:
+        """Download two deduplicated files, merge them, and upload result to file server."""
+        print(f"[{self.client_id}] Started merge task: {task_id}")
+        print(f"[{self.client_id}]   File 1: {file1}")
+        print(f"[{self.client_id}]   File 2: {file2}")
+
+        try:
+            # Download both files from file server
+            path1 = self._fetch_file(file1, fileserver_address)
+            path2 = self._fetch_file(file2, fileserver_address)
+
+            # Merge and deduplicate primes
+            primes = set()
+
+            for filepath in [path1, path2]:
+                with open(filepath, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            primes.add(int(line))
+
+            print(
+                f"[{self.client_id}] Finished merging: {len(primes):,} unique primes total"
+            )
+
+            # Write sorted merged result to local file
+            merged_filename = f"merged_{task_id}.txt"
+            merged_path = self.cache_dir / merged_filename
+
+            with open(merged_path, "w") as f:
+                for prime in sorted(primes):
+                    f.write(f"{prime}\n")
+
+            print(f"[{self.client_id}] Wrote merged result to {merged_filename}")
+
+            # Upload result to file server
+            success = self._upload_file(
+                merged_path, merged_filename, fileserver_address
+            )
+
+            # Delete local file only if upload succeeded
+            if success:
+                merged_path.unlink()
+                print(f"[{self.client_id}] Deleted local {merged_filename}")
+
+            return success
+
+        except Exception as e:
+            print(f"[{self.client_id}] Merge error: {e}")
+            return False
 
     def _heartbeat_loop(self):
         """Background thread that sends periodic heartbeats."""
@@ -111,7 +219,9 @@ class Client:
                 response = self.coordinator.SendHeartbeat(request)
 
                 if not response.acknowledged:
-                    print(f"[{self.client_id}] Warning: Heartbeat not acknowledged")
+                    print(
+                        f"[{self.client_id}] Warning: Heartbeat not acknowledged by coordinator"
+                    )
 
             except grpc.RpcError as e:
                 print(f"[{self.client_id}] Heartbeat error: {e}")
@@ -125,7 +235,7 @@ class Client:
         )
         self.heartbeat_thread.start()
         print(
-            f"[{self.client_id}] Heartbeat started (interval: {self.heartbeat_interval}s)"
+            f"[{self.client_id}] Heartbeat started with interval: {self.heartbeat_interval}s"
         )
 
     def _stop_heartbeat(self):
@@ -135,7 +245,7 @@ class Client:
             self.heartbeat_thread.join(timeout=self.heartbeat_interval + 1)
 
     def run(self):
-        """Main loop: request task, process file, submit result."""
+        """Main loop: request tasks from coordinator and process them."""
         print(f"[{self.client_id}] Started")
 
         # Start heartbeat thread
@@ -165,33 +275,57 @@ class Client:
                 no_task_attempts = 0
 
                 print(f"[{self.client_id}] Received task from coordinator")
-                print(f"[{self.client_id}] Task details:")
-                print(f"[{self.client_id}]   File: {task.filename}")
-                print(f"[{self.client_id}]   File server: {task.fileserver_address}")
+                print(f"[{self.client_id}] Task type: {task.task_type}")
 
-                # Process entire file
+                # Process task based on type
                 start_time = time.time()
-                primes = self.process_file(
-                    task.filename,
-                    task.fileserver_address,
-                )
+                success = False
+                task_id = ""
+
+                if task.task_type == coordinator_pb2.FIND_PRIMES:
+                    print(f"[{self.client_id}] Task details:")
+                    print(f"[{self.client_id}]   File: {task.filename}")
+                    print(
+                        f"[{self.client_id}]   File server: {task.fileserver_address}"
+                    )
+
+                    success = self.process_file(task.filename, task.fileserver_address)
+                    task_id = task.filename
+
+                elif task.task_type == coordinator_pb2.MERGE:
+                    print(f"[{self.client_id}] Task details:")
+                    print(f"[{self.client_id}]   Task ID: {task.task_id}")
+                    print(f"[{self.client_id}]   File 1: {task.file1}")
+                    print(f"[{self.client_id}]   File 2: {task.file2}")
+                    print(
+                        f"[{self.client_id}]   File server: {task.fileserver_address}"
+                    )
+
+                    success = self.merge_files(
+                        task.file1, task.file2, task.task_id, task.fileserver_address
+                    )
+                    task_id = task.task_id
+
                 elapsed = time.time() - start_time
+                print(f"[{self.client_id}] Task completed in {elapsed:.2f}s")
 
-                print(
-                    f"[{self.client_id}] Processing result: Found {len(primes):,} primes in {elapsed:.2f}s"
-                )
+                # Acknowledge task completion
+                if success:
+                    print(f"[{self.client_id}] Acknowledging task completion")
+                    completion_request = coordinator_pb2.TaskCompletionRequest(
+                        client_id=self.client_id, task_id=task_id
+                    )
+                    response = self.coordinator.CompleteTask(completion_request)
 
-                # Submit result back
-                print(f"[{self.client_id}] Submitting result to coordinator")
-                submit_request = coordinator_pb2.SubmitRequest(
-                    client_id=self.client_id, filename=task.filename, primes=primes
-                )
-                response = self.coordinator.SubmitPrimes(submit_request)
-
-                if response.success:
-                    print(f"[{self.client_id}] Submit result: Success")
+                    if response.acknowledged:
+                        print(f"[{self.client_id}] Task acknowledged by coordinator")
+                    else:
+                        print(
+                            f"[{self.client_id}] Warning: Task not acknowledged by coordinator"
+                        )
                 else:
-                    print(f"[{self.client_id}] Submit result: Failed")
+                    print(f"[{self.client_id}] Task failed")
+                    print(f"[{self.client_id}] Not acknowledging failed task")
 
             except KeyboardInterrupt:
                 print(f"[{self.client_id}] Stopping")

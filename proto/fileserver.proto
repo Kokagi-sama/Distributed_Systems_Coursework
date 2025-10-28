@@ -4,6 +4,7 @@ package fileserver;
 
 service FileServer {
     rpc FetchFile(FetchRequest) returns (FetchResponse);
+    rpc UploadFile(UploadRequest) returns (UploadResponse);
 }
 
 message FetchRequest {
@@ -14,4 +15,14 @@ message FetchResponse {
     bool success = 1;
     bytes file_data = 2;
     string error_message = 3;
+}
+
+message UploadRequest {
+    string filename = 1;
+    bytes file_data = 2;
+}
+
+message UploadResponse {
+    bool success = 1;
+    string error_message = 2;
 }

@@ -26,24 +26,24 @@ def test_process_file(temp_test_file):
     client = Client("test-client", "localhost:50051")
 
     file_content = temp_test_file.read_bytes()
-    mock_response = fileserver_pb2.FetchResponse(
+    fetch_response = fileserver_pb2.FetchResponse(
         success=True, file_data=file_content, error_message=""
     )
+    upload_response = fileserver_pb2.UploadResponse(success=True, error_message="")
+
     mock_stub = MagicMock()
-    mock_stub.FetchFile.return_value = mock_response
+    mock_stub.FetchFile.return_value = fetch_response
+    mock_stub.UploadFile.return_value = upload_response
 
     with patch("grpc.insecure_channel"):
         with patch(
             "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
         ):
-            primes = client.process_file(str(temp_test_file.name), "localhost:50052")
+            success = client.process_file(str(temp_test_file.name), "localhost:50052")
 
-    assert len(primes) == 5
-    assert 17 in primes
-    assert 19 in primes
-    assert 23 in primes
-    assert 29 in primes
-    assert 31 in primes
+    assert success is True
+    assert mock_stub.FetchFile.call_count == 1
+    assert mock_stub.UploadFile.call_count == 1
 
 
 def test_request_task_with_mock():
@@ -52,6 +52,7 @@ def test_request_task_with_mock():
 
     mock_response = coordinator_pb2.TaskResponse(
         has_task=True,
+        task_type=coordinator_pb2.FIND_PRIMES,
         filename="test.txt",
         fileserver_address="localhost:50052",
     )
@@ -61,23 +62,24 @@ def test_request_task_with_mock():
     task = client.coordinator.RequestTask(request)
 
     assert task.has_task is True
+    assert task.task_type == coordinator_pb2.FIND_PRIMES
     assert task.filename == "test.txt"
     assert task.fileserver_address == "localhost:50052"
 
 
-def test_submit_primes_with_mock():
-    """Test SubmitPrimes RPC with mock coordinator."""
+def test_complete_task_with_mock():
+    """Test CompleteTask RPC with mock coordinator."""
     client = Client("test-client", "localhost:50051")
 
-    mock_response = coordinator_pb2.SubmitResponse(success=True)
-    client.coordinator.SubmitPrimes = Mock(return_value=mock_response)
+    mock_response = coordinator_pb2.TaskCompletionResponse(acknowledged=True)
+    client.coordinator.CompleteTask = Mock(return_value=mock_response)
 
-    submit_request = coordinator_pb2.SubmitRequest(
-        client_id=client.client_id, filename="test.txt", primes=[2, 3, 5, 7]
+    completion_request = coordinator_pb2.TaskCompletionRequest(
+        client_id=client.client_id, task_id="test.txt"
     )
-    response = client.coordinator.SubmitPrimes(submit_request)
+    response = client.coordinator.CompleteTask(completion_request)
 
-    assert response.success is True
+    assert response.acknowledged is True
 
 
 def test_no_task_available():

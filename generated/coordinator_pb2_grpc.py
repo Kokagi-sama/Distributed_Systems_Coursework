@@ -39,10 +39,10 @@ class CoordinatorStub(object):
                 request_serializer=coordinator__pb2.TaskRequest.SerializeToString,
                 response_deserializer=coordinator__pb2.TaskResponse.FromString,
                 _registered_method=True)
-        self.SubmitPrimes = channel.unary_unary(
-                '/coordinator.Coordinator/SubmitPrimes',
-                request_serializer=coordinator__pb2.SubmitRequest.SerializeToString,
-                response_deserializer=coordinator__pb2.SubmitResponse.FromString,
+        self.CompleteTask = channel.unary_unary(
+                '/coordinator.Coordinator/CompleteTask',
+                request_serializer=coordinator__pb2.TaskCompletionRequest.SerializeToString,
+                response_deserializer=coordinator__pb2.TaskCompletionResponse.FromString,
                 _registered_method=True)
         self.SendHeartbeat = channel.unary_unary(
                 '/coordinator.Coordinator/SendHeartbeat',
@@ -60,7 +60,7 @@ class CoordinatorServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def SubmitPrimes(self, request, context):
+    def CompleteTask(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -80,10 +80,10 @@ def add_CoordinatorServicer_to_server(servicer, server):
                     request_deserializer=coordinator__pb2.TaskRequest.FromString,
                     response_serializer=coordinator__pb2.TaskResponse.SerializeToString,
             ),
-            'SubmitPrimes': grpc.unary_unary_rpc_method_handler(
-                    servicer.SubmitPrimes,
-                    request_deserializer=coordinator__pb2.SubmitRequest.FromString,
-                    response_serializer=coordinator__pb2.SubmitResponse.SerializeToString,
+            'CompleteTask': grpc.unary_unary_rpc_method_handler(
+                    servicer.CompleteTask,
+                    request_deserializer=coordinator__pb2.TaskCompletionRequest.FromString,
+                    response_serializer=coordinator__pb2.TaskCompletionResponse.SerializeToString,
             ),
             'SendHeartbeat': grpc.unary_unary_rpc_method_handler(
                     servicer.SendHeartbeat,
@@ -129,7 +129,7 @@ class Coordinator(object):
             _registered_method=True)
 
     @staticmethod
-    def SubmitPrimes(request,
+    def CompleteTask(request,
             target,
             options=(),
             channel_credentials=None,
@@ -142,9 +142,9 @@ class Coordinator(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/coordinator.Coordinator/SubmitPrimes',
-            coordinator__pb2.SubmitRequest.SerializeToString,
-            coordinator__pb2.SubmitResponse.FromString,
+            '/coordinator.Coordinator/CompleteTask',
+            coordinator__pb2.TaskCompletionRequest.SerializeToString,
+            coordinator__pb2.TaskCompletionResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -4,8 +4,13 @@ package coordinator;
 
 service Coordinator {
     rpc RequestTask(TaskRequest) returns (TaskResponse);
-    rpc SubmitPrimes(SubmitRequest) returns (SubmitResponse);
+    rpc CompleteTask(TaskCompletionRequest) returns (TaskCompletionResponse);
     rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+enum TaskType {
+    FIND_PRIMES = 0;
+    MERGE = 1;
 }
 
 message TaskRequest {
@@ -14,18 +19,25 @@ message TaskRequest {
 
 message TaskResponse {
     bool has_task = 1;
-    string filename = 2;
+    TaskType task_type = 2;
     string fileserver_address = 3;
+
+    // For FIND_PRIMES task:
+    string filename = 4;
+
+    // For MERGE task:
+    string task_id = 5;
+    string file1 = 6;
+    string file2 = 7;
 }
 
-message SubmitRequest {
+message TaskCompletionRequest {
     string client_id = 1;
-    string filename = 2;
-    repeated uint64 primes = 3;
+    string task_id = 2;
 }
 
-message SubmitResponse {
-    bool success = 1;
+message TaskCompletionResponse {
+    bool acknowledged = 1;
 }
 
 message HeartbeatRequest {
