@@ -3,12 +3,10 @@ syntax = "proto3";
 package fileserver;
 
 service FileServer {
-    rpc FetchFile(FetchRequest) returns (FetchResponse);
-    rpc UploadFile(UploadRequest) returns (UploadResponse);
-}
+    rpc FetchFile(MetaData) returns (stream FetchResponse);
+    rpc UploadFile(stream UploadRequest) returns (UploadResponse);
 
-message FetchRequest {
-    string filename = 1;
+    rpc RetrieveFileList(RetrieveFileListRequest) returns (RetrieveFileListResponse);
 }
 
 message FetchResponse {
@@ -18,11 +16,26 @@ message FetchResponse {
 }
 
 message UploadRequest {
-    string filename = 1;
-    bytes file_data = 2;
+    oneof request {
+        MetaData metadata = 1;
+        bytes file_data = 2;
+    }
 }
 
 message UploadResponse {
     bool success = 1;
     string error_message = 2;
+}
+
+message MetaData {
+    string filename = 1;
+    string extension = 2;
+}
+
+message RetrieveFileListRequest {
+    string data_type = 1;
+}
+
+message RetrieveFileListResponse {
+    map<int32, MetaData> file_list = 1;
 }
