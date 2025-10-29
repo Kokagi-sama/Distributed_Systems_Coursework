@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import fileserver_pb2 as fileserver__pb2
+import fileserver_pb2 as fileserver__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -34,15 +34,20 @@ class FileServerStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.FetchFile = channel.unary_unary(
+        self.FetchFile = channel.unary_stream(
                 '/fileserver.FileServer/FetchFile',
-                request_serializer=fileserver__pb2.FetchRequest.SerializeToString,
+                request_serializer=fileserver__pb2.MetaData.SerializeToString,
                 response_deserializer=fileserver__pb2.FetchResponse.FromString,
                 _registered_method=True)
-        self.UploadFile = channel.unary_unary(
+        self.UploadFile = channel.stream_unary(
                 '/fileserver.FileServer/UploadFile',
                 request_serializer=fileserver__pb2.UploadRequest.SerializeToString,
                 response_deserializer=fileserver__pb2.UploadResponse.FromString,
+                _registered_method=True)
+        self.RetrieveFileList = channel.unary_unary(
+                '/fileserver.FileServer/RetrieveFileList',
+                request_serializer=fileserver__pb2.RetrieveFileListRequest.SerializeToString,
+                response_deserializer=fileserver__pb2.RetrieveFileListResponse.FromString,
                 _registered_method=True)
 
 
@@ -55,7 +60,13 @@ class FileServerServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def UploadFile(self, request, context):
+    def UploadFile(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RetrieveFileList(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -64,15 +75,20 @@ class FileServerServicer(object):
 
 def add_FileServerServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'FetchFile': grpc.unary_unary_rpc_method_handler(
+            'FetchFile': grpc.unary_stream_rpc_method_handler(
                     servicer.FetchFile,
-                    request_deserializer=fileserver__pb2.FetchRequest.FromString,
+                    request_deserializer=fileserver__pb2.MetaData.FromString,
                     response_serializer=fileserver__pb2.FetchResponse.SerializeToString,
             ),
-            'UploadFile': grpc.unary_unary_rpc_method_handler(
+            'UploadFile': grpc.stream_unary_rpc_method_handler(
                     servicer.UploadFile,
                     request_deserializer=fileserver__pb2.UploadRequest.FromString,
                     response_serializer=fileserver__pb2.UploadResponse.SerializeToString,
+            ),
+            'RetrieveFileList': grpc.unary_unary_rpc_method_handler(
+                    servicer.RetrieveFileList,
+                    request_deserializer=fileserver__pb2.RetrieveFileListRequest.FromString,
+                    response_serializer=fileserver__pb2.RetrieveFileListResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -96,11 +112,11 @@ class FileServer(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
+        return grpc.experimental.unary_stream(
             request,
             target,
             '/fileserver.FileServer/FetchFile',
-            fileserver__pb2.FetchRequest.SerializeToString,
+            fileserver__pb2.MetaData.SerializeToString,
             fileserver__pb2.FetchResponse.FromString,
             options,
             channel_credentials,
@@ -113,7 +129,34 @@ class FileServer(object):
             _registered_method=True)
 
     @staticmethod
-    def UploadFile(request,
+    def UploadFile(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(
+            request_iterator,
+            target,
+            '/fileserver.FileServer/UploadFile',
+            fileserver__pb2.UploadRequest.SerializeToString,
+            fileserver__pb2.UploadResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RetrieveFileList(request,
             target,
             options=(),
             channel_credentials=None,
@@ -126,9 +169,9 @@ class FileServer(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/fileserver.FileServer/UploadFile',
-            fileserver__pb2.UploadRequest.SerializeToString,
-            fileserver__pb2.UploadResponse.FromString,
+            '/fileserver.FileServer/RetrieveFileList',
+            fileserver__pb2.RetrieveFileListRequest.SerializeToString,
+            fileserver__pb2.RetrieveFileListResponse.FromString,
             options,
             channel_credentials,
             insecure,
