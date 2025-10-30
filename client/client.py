@@ -1,3 +1,4 @@
+import os
 import grpc
 import sys
 import threading
@@ -25,7 +26,8 @@ class Client:
 
         # Connect to coordinator via gRPC
         coordinator_channel = grpc.insecure_channel(coordinator_address)
-        self.coordinator = coordinator_pb2_grpc.CoordinatorStub(coordinator_channel)
+        self.coordinator = coordinator_pb2_grpc.CoordinatorStub(
+            coordinator_channel)
 
         # File cache
         self.cached_files = {}
@@ -38,6 +40,92 @@ class Client:
         print(f"[{client_id}] Client initialized")
         print(f"[{client_id}] Cache directory: {self.cache_dir}")
 
+
+
+
+
+
+
+
+
+
+
+    # TODO: Edit starts here
+
+    def read_file_iterator(self, filepath: Path, chunk_size: int = 1024):
+        """Generator that reads a file in chunks for uploading. Pass this into stub call when uploading a file.
+        """
+        split_filepath = os.path.splitext(filepath)
+        filename = split_filepath[0]
+        extension = split_filepath[1]
+
+        metadata = fileserver_pb2.MetaData(
+            filename=filename, extension=extension)
+        yield fileserver_pb2.UploadRequest(metadata=metadata)
+        with open(filepath, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if chunk:
+                    upload_request = fileserver_pb2.UploadRequest(
+                        file_data=chunk)
+                    yield upload_request
+                else:
+                    return
+
+    def download_file(self, filename: str, extension: str, fileserver_address: str):
+        """Download file from fileserver.
+
+        Args:
+            filename (str): File name without extension
+            extension (str): Extension including dot, e.g. .txt
+            fileserver_address (str): Address of the fileserver
+
+        Returns:
+            Path: File path of file downloaded to local disk
+        """
+        filepath = self.cache_dir / Path(f"{filename}.{extension}").name
+
+        # Connect to file server
+        print(
+            f"[{self.client_id}] Downloading {filename}.{extension} from {fileserver_address}")
+        fileserver_channel = grpc.insecure_channel(fileserver_address)
+        fileserver_stub = fileserver_pb2_grpc.FileServerStub(
+            fileserver_channel)
+
+        # Request file via RPC
+        response = fileserver_stub.FetchFile(fileserver_pb2.FetchRequest(metadata=fileserver_pb2.MetaData(
+            filename=filename,
+            extension=extension
+        )))
+
+        if not response.success:
+            raise FileNotFoundError(
+                f"File {filename}{extension} not found: {response.error_message}"
+            )
+
+        for download_response in response:
+            with open(filepath, "ab") as f:
+                # TODO: Note that fileserver need to set file_data size
+                f.write(download_response.file_data)
+
+        print(
+            f"[{self.client_id}] Successfully downloaded {filename}{extension} from {fileserver_address}")
+
+        return filepath
+
+    # TODO: Edit ends here
+
+
+
+
+
+
+
+
+
+
+
+
     def _fetch_file(self, filename: str, fileserver_address: str) -> Path:
         """Fetch file from file server and cache it locally."""
         # Return cached version if available
@@ -48,7 +136,8 @@ class Client:
         # Connect to file server
         print(f"[{self.client_id}] Fetching {filename} from {fileserver_address}")
         fileserver_channel = grpc.insecure_channel(fileserver_address)
-        fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
+        fileserver_stub = fileserver_pb2_grpc.FileServerStub(
+            fileserver_channel)
 
         # Request file via RPC
         request = fileserver_pb2.FetchRequest(filename=filename)
@@ -75,7 +164,8 @@ class Client:
         self, local_filepath: Path, remote_filename: str, fileserver_address: str
     ) -> bool:
         """Upload file to file server."""
-        print(f"[{self.client_id}] Uploading {remote_filename} to {fileserver_address}")
+        print(
+            f"[{self.client_id}] Uploading {remote_filename} to {fileserver_address}")
 
         try:
             # Read local file data
@@ -83,7 +173,8 @@ class Client:
 
             # Connect to file server
             fileserver_channel = grpc.insecure_channel(fileserver_address)
-            fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
+            fileserver_stub = fileserver_pb2_grpc.FileServerStub(
+                fileserver_channel)
 
             # Upload file via RPC
             request = fileserver_pb2.UploadRequest(
@@ -149,7 +240,8 @@ class Client:
         print(f"[{self.client_id}] Wrote deduplicated primes to {result_filename}")
 
         # Upload result to file server
-        success = self._upload_file(result_path, result_filename, fileserver_address)
+        success = self._upload_file(
+            result_path, result_filename, fileserver_address)
 
         # Delete local file only if upload succeeded
         if success:
@@ -215,7 +307,8 @@ class Client:
         """Background thread that sends periodic heartbeats."""
         while self.heartbeat_running:
             try:
-                request = coordinator_pb2.HeartbeatRequest(client_id=self.client_id)
+                request = coordinator_pb2.HeartbeatRequest(
+                    client_id=self.client_id)
                 response = self.coordinator.SendHeartbeat(request)
 
                 if not response.acknowledged:
@@ -289,7 +382,8 @@ class Client:
                         f"[{self.client_id}]   File server: {task.fileserver_address}"
                     )
 
-                    success = self.process_file(task.filename, task.fileserver_address)
+                    success = self.process_file(
+                        task.filename, task.fileserver_address)
                     task_id = task.filename
 
                 elif task.task_type == coordinator_pb2.MERGE:
@@ -315,10 +409,12 @@ class Client:
                     completion_request = coordinator_pb2.TaskCompletionRequest(
                         client_id=self.client_id, task_id=task_id
                     )
-                    response = self.coordinator.CompleteTask(completion_request)
+                    response = self.coordinator.CompleteTask(
+                        completion_request)
 
                     if response.acknowledged:
-                        print(f"[{self.client_id}] Task acknowledged by coordinator")
+                        print(
+                            f"[{self.client_id}] Task acknowledged by coordinator")
                     else:
                         print(
                             f"[{self.client_id}] Warning: Task not acknowledged by coordinator"
