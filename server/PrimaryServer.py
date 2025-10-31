@@ -2,10 +2,14 @@ import argparse
 import grpc
 from concurrent import futures
 import threading
+import sys
+import os
 
-import fs_pb2
-import fs_pb2_grpc
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# --- Now your other imports can work ---
+from proto import fs_pb2
+from proto import fs_pb2_grpc
 
 class PrimaryServicer(fs_pb2_grpc.FileServiceServicer):
     def __init__(self, replicas):

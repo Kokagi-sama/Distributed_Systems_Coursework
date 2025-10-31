@@ -1,9 +1,71 @@
 syntax = "proto3";
-package afs;
 
-message OpenReq { string path = 1; string mode = 2; }
-message OpenResp { string file_id = 1; int64 version = 2; }
+// You can keep your package name if you want
+package afs; 
 
 service FileService {
-  rpc Open(OpenReq) returns (OpenResp);
+  rpc Create (CreateRequest) returns (CreateResponse);
+  rpc Open (OpenRequest) returns (OpenResponse);
+  rpc Read (ReadRequest) returns (ReadResponse);
+  rpc Write (WriteRequest) returns (WriteResponse);
+  rpc Close (CloseRequest) returns (CloseResponse);
+  rpc ReplicateWrite (ReplicateWriteRequest) returns (ReplicateWriteResponse);
+}
+
+// Create
+message CreateRequest {
+  string filename = 1;
+}
+message CreateResponse {
+  string error = 1;
+}
+
+// Open
+message OpenRequest {
+  string filename = 1;
+  bool create_if_missing = 2;
+}
+message OpenResponse {
+  int64 handle_id = 1;
+  string error = 2;
+}
+
+// Read
+message ReadRequest {
+  int64 handle_id = 1;
+  int64 offset = 2;
+  int64 size = 3;
+}
+message ReadResponse {
+  bytes data = 1;
+  string error = 2;
+}
+
+// Write
+message WriteRequest {
+  int64 handle_id = 1;
+  int64 offset = 2;
+  bytes data = 3;
+}
+message WriteResponse {
+  int64 bytes_written = 1;
+  string error = 2;
+}
+
+// Close
+message CloseRequest {
+  int64 handle_id = 1;
+}
+message CloseResponse {
+  string error = 1;
+}
+
+// ReplicateWrite (for server-to-server)
+message ReplicateWriteRequest {
+  string filename = 1;
+  bytes contents = 2;
+  int64 version = 3;
+}
+message ReplicateWriteResponse {
+  string error = 1;
 }
