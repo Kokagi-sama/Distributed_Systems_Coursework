@@ -1,11 +1,9 @@
 """
 FileServer with AFS semantics, Leader Election, and Chandy-Lamport Snapshots
 
-This implements the FileServer service that your client.py expects:
-- FetchFile: Get entire file (AFS whole-file caching)
-- UploadFile: Store entire file (AFS whole-file write)
-
-Plus distributed features:
+Implements:
+- FetchFile (Server-Streaming): Get file in chunks
+- UploadFile (Client-Streaming): Store file from chunks
 - Leader election with automatic failover
 - Chandy-Lamport snapshots for crash recovery
 - File replication across nodes
@@ -22,7 +20,7 @@ import random
 import pickle
 from pathlib import Path
 # Added typing imports
-from typing import List, Dict, Optional, Set, Any
+from typing import List, Dict, Optional, Set, Any, Iterator
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -41,12 +39,6 @@ STATE_LEADER: str = "LEADER"
 class FileServer(fileserver_pb2_grpc.FileServerServicer):
     """
     FileServer with Leader Election and Snapshots
-    
-    Implements:
-    - FetchFile/UploadFile for client operations
-    - Leader election for high availability
-    - Chandy-Lamport snapshots for recovery
-    - File replication across cluster
     """
     
     def __init__(
@@ -107,62 +99,85 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         return self.state == STATE_LEADER
     
     # ========================================================================
-    # CLIENT-FACING FILE OPERATIONS (What your client.py expects)
+    # CLIENT-FACING FILE OPERATIONS
     # ========================================================================
     
     def FetchFile(
-        self, request: fileserver_pb2.FetchRequest, context: grpc.ServicerContext
-    ) -> fileserver_pb2.FetchResponse:
+        self, request: fileserver_pb2.MetaData, context: grpc.ServicerContext
+    ) -> Iterator[fileserver_pb2.FetchResponse]:
         """
-        Fetch entire file (AFS semantics: whole-file caching)
-        
-        Called by: client._fetch_file()
+        Fetch file in chunks (Server-Streaming RPC).
         """
-        filename = request.filename
+        # Reconstruct filename from MetaData
+        filename = f"{request.filename}{request.extension}"
         
-        print(f"[{self.server_id}] FetchFile request: {filename}")
+        print(f"[{self.server_id}] FetchFile (streaming) request: {filename}")
         
         with self.lock:
-            # Allow reads from any server (leader or follower)
             if filename not in self.files:
                 print(f"[{self.server_id}] File not found: {filename}")
-                return fileserver_pb2.FetchResponse(
+                # Send one error message and stop
+                yield fileserver_pb2.FetchResponse(
                     success=False,
-                    file_data=b"",
                     error_message=f"File not found: {filename}",
-                    version=0,
                 )
+                return  # Stop the generator
             
-            f = self.files[filename]
-            print(
-                f"[{self.server_id}] Returning {filename} (version {f['version']}, {len(f['data'])} bytes)"
-            )
-            
-            return fileserver_pb2.FetchResponse(
+            # Get file data from internal storage
+            file_data = self.files[filename]["data"]
+        
+        # Send the file in 1MB chunks
+        chunk_size = 1024 * 1024  # 1MB
+        for i in range(0, len(file_data), chunk_size):
+            chunk = file_data[i : i + chunk_size]
+            yield fileserver_pb2.FetchResponse(
                 success=True,
-                file_data=f["data"],
-                error_message="",
-                version=f["version"],
+                file_data=chunk
             )
+        
+        print(f"[{self.server_id}] Finished streaming {filename}")
     
     def UploadFile(
-        self, request: fileserver_pb2.UploadRequest, context: grpc.ServicerContext
+        self, request_iterator: Iterator[fileserver_pb2.UploadRequest], context: grpc.ServicerContext
     ) -> fileserver_pb2.UploadResponse:
         """
-        Upload/Store entire file (AFS semantics: whole-file write)
-        
-        Called by: client._upload_file()
-        
+        Upload/Store file from chunks (Client-Streaming RPC).
         Only leader can accept writes!
         """
-        filename = request.filename
-        file_data = request.file_data
-        expected_version = request.expected_version
+        print(f"[{self.server_id}] UploadFile (streaming) request received...")
         
-        print(
-            f"[{self.server_id}] UploadFile request: {filename} ({len(file_data)} bytes)"
-        )
+        metadata: Optional[fileserver_pb2.MetaData] = None
+        file_chunks = []
         
+        try:
+            # 1. Loop over the client's stream
+            for request in request_iterator:
+                # Check the 'oneof' field to see what kind of data this is
+                if request.HasField("metadata"):
+                    if metadata is not None:
+                        raise ValueError("Client sent metadata twice")
+                    metadata = request.metadata
+                elif request.HasField("file_data"):
+                    if metadata is None:
+                        raise ValueError("Client sent file data before metadata")
+                    file_chunks.append(request.file_data)
+            
+            if not metadata:
+                raise ValueError("Client sent no metadata")
+
+        except Exception as e:
+            print(f"[{self.server_id}] Error in upload stream: {e}")
+            return fileserver_pb2.UploadResponse(
+                success=False, error_message=str(e)
+            )
+
+        # 2. Reassemble the file
+        filename = f"{metadata.filename}{metadata.extension}"
+        file_data = b"".join(file_chunks)
+        
+        print(f"[{self.server_id}] Stream complete for {filename} ({len(file_data)} bytes)")
+        
+        # 3. Acquire lock and perform the write (if leader)
         with self.lock:
             # Check if we're the leader
             if not self._is_leader():
@@ -171,23 +186,12 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 )
                 print(f"[{self.server_id}] Rejected upload: {error_msg}")
                 return fileserver_pb2.UploadResponse(
-                    success=False, error_message=error_msg, new_version=0
+                    success=False, error_message=error_msg
                 )
             
-            # Get current version
+            # Internal versioning logic is maintained for replication,
+            # even though the client-facing API no longer uses it.
             if filename in self.files:
-                current_version = self.files[filename]["version"]
-                
-                # Optimistic concurrency control (if expected_version provided)
-                if expected_version > 0 and expected_version != current_version:
-                    error_msg = f"Version mismatch: expected {expected_version}, current {current_version}"
-                    print(f"[{self.server_id}] {error_msg}")
-                    return fileserver_pb2.UploadResponse(
-                        success=False,
-                        error_message=error_msg,
-                        new_version=current_version,
-                    )
-                
                 # Update existing file
                 self.files[filename]["data"] = file_data
                 self.files[filename]["version"] += 1
@@ -199,13 +203,14 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             
             print(f"[{self.server_id}] Stored {filename} (version {new_version})")
         
-        # Replicate to followers
+        # 4. Replicate to followers
         self._replicate_to_followers(filename)
         
+        # 5. Send the single response
         return fileserver_pb2.UploadResponse(
-            success=True, error_message="", new_version=new_version
+            success=True, error_message=""
         )
-    
+
     # ========================================================================
     # LEADER ELECTION
     # ========================================================================
@@ -248,6 +253,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 try:
                     with grpc.insecure_channel(peer) as channel:
                         stub = fileserver_pb2_grpc.FileServerStub(channel)
+
                         request = fileserver_pb2.VoteRequest(
                             term=term,
                             candidate_id=candidate_id,
@@ -352,6 +358,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 try:
                     with grpc.insecure_channel(peer) as channel:
                         stub = fileserver_pb2_grpc.FileServerStub(channel)
+
                         request = fileserver_pb2.HeartbeatRequest(
                             term=term, leader_id=leader_id
                         )
@@ -369,6 +376,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             if filename not in self.files:
                 return
             f = self.files[filename]
+            # This request needs the version, which is why we keep it internally
             req = fileserver_pb2.ReplicateFileRequest(
                 filename=filename,
                 contents=f["data"],
@@ -405,7 +413,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         return fileserver_pb2.ReplicateFileResponse(error="")
     
     # ========================================================================
-    # CHANDY-LAMPORT SNAPSHOT (Implementation same as before)
+    # CHANDY-LAMPORT SNAPSHOT
     # ========================================================================
     
     class SnapshotState:
@@ -413,10 +421,10 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         def __init__(self, snapshot_id: str, initiator_id: str) -> None:
             self.snapshot_id: str = snapshot_id
             self.initiator_id: str = initiator_id
-            self.local_state: Optional[Dict[str, Dict[str, Any]]] = None  # Snapshot of local files
-            self.channel_states: Dict[str, List[Any]] = {}  # channel_id -> list of messages
-            self.markers_received: Set[str] = set()  # Set of channels that sent markers
-            self.recording_channels: Set[str] = set()  # Channels currently recording
+            self.local_state: Optional[Dict[str, Dict[str, Any]]] = None
+            self.channel_states: Dict[str, List[Any]] = {}
+            self.markers_received: Set[str] = set()
+            self.recording_channels: Set[str] = set()
             self.is_complete: bool = False
             self.timestamp: float = time.time()
     
@@ -432,14 +440,11 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         print(f"[{self.server_id}] Initiating snapshot {snapshot_id}")
         
         with self.snapshot_lock:
-            # If snapshot already exists, return
             if snapshot_id in self.snapshots:
                 return fileserver_pb2.SnapshotResponse(success=True, error="")
             
-            # Create new snapshot state
             snapshot_state = self.SnapshotState(snapshot_id, initiator_id)
             
-            # Record local state
             with self.lock:
                 snapshot_state.local_state = {
                     fname: {"data": fdata["data"], "version": fdata["version"]}
@@ -450,7 +455,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 f"[{self.server_id}] Recorded local state: {len(snapshot_state.local_state)} files"
             )
             
-            # Initialize channel recording for all incoming channels
             for peer in self.peers:
                 channel_id = f"{peer}->{self.server_id}"
                 snapshot_state.recording_channels.add(channel_id)
@@ -458,7 +462,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             
             self.snapshots[snapshot_id] = snapshot_state
         
-        # Send markers to all peers
         self._send_markers(snapshot_id)
         
         return fileserver_pb2.SnapshotResponse(success=True, error="")
@@ -492,46 +495,34 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     def Marker(
         self, request: fileserver_pb2.MarkerMessage, context: grpc.ServicerContext
     ) -> fileserver_pb2.MarkerResponse:
-        """Receive a marker message (Chandy-Lamport algorithm)"""
+        """Receive a marker message"""
         snapshot_id = request.snapshot_id
         sender_id = request.sender_id
-        channel_id = request.channel_id
         
         print(
             f"[{self.server_id}] Received marker from {sender_id} for snapshot {snapshot_id}"
         )
         
         with self.snapshot_lock:
-            # Check if this is the first marker we receive for this snapshot
             if snapshot_id not in self.snapshots:
-                # First marker: record local state and start recording
                 print(
                     f"[{self.server_id}] First marker for snapshot {snapshot_id}"
                 )
-                
                 snapshot_state = self.SnapshotState(snapshot_id, sender_id)
-                
-                # Record local state
                 with self.lock:
                     snapshot_state.local_state = {
                         fname: {"data": fdata["data"], "version": fdata["version"]}
                         for fname, fdata in self.files.items()
                     }
-                
-                # Initialize channel recording
                 for peer in self.peers:
                     ch_id = f"{peer}->{self.server_id}"
                     snapshot_state.recording_channels.add(ch_id)
                     snapshot_state.channel_states[ch_id] = []
-                
                 self.snapshots[snapshot_id] = snapshot_state
-                
-                # Send markers to all other peers
                 self._send_markers(snapshot_id)
             
             snapshot_state = self.snapshots[snapshot_id]
             
-            # Stop recording on this channel
             incoming_channel = f"{sender_id}->{self.server_id}"
             if incoming_channel in snapshot_state.recording_channels:
                 snapshot_state.recording_channels.remove(incoming_channel)
@@ -541,7 +532,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             
             snapshot_state.markers_received.add(sender_id)
             
-            # Check if snapshot is complete (received markers from all peers)
             if len(snapshot_state.markers_received) == len(self.peers):
                 snapshot_state.is_complete = True
                 print(
@@ -573,7 +563,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     
     def GetSnapshot(
         self,
-        request: fileserver_pb2.GetSnapshotRequest,  # NOTE: Adjust message name if needed
+        request: fileserver_pb2.GetSnapshotRequest,
         context: grpc.ServicerContext,
     ) -> fileserver_pb2.GetSnapshotResponse:
         """Get the state of a specific snapshot"""
@@ -586,8 +576,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 )
             
             snapshot_state = self.snapshots[snapshot_id]
-            
-            # Convert local state to protobuf
             local_state_pb = []
             if snapshot_state.local_state:
                 for fname, fdata in snapshot_state.local_state.items():
@@ -599,12 +587,11 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                         )
                     )
             
-            # Convert channel states to protobuf
             channel_states_pb = []
             for ch_id, messages in snapshot_state.channel_states.items():
                 channel_state = fileserver_pb2.ChannelState(
                     channel_id=ch_id,
-                    messages=[],  # For simplicity, not tracking messages in transit
+                    messages=[],
                 )
                 channel_states_pb.append(channel_state)
             
@@ -617,21 +604,19 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     
     def RestoreFromSnapshot(
         self,
-        request: fileserver_pb2.RestoreRequest,  # NOTE: Adjust message name if needed
+        request: fileserver_pb2.RestoreRequest,
         context: grpc.ServicerContext,
     ) -> fileserver_pb2.RestoreResponse:
         """Restore system state from a snapshot"""
         snapshot_id = request.snapshot_id
         
         try:
-            # Load snapshot from disk
             filename = f"snapshot_{snapshot_id}_{self.server_id}.pkl"
             with open(filename, "rb") as f:
                 snapshot_data = pickle.load(f)
             
             print(f"[{self.server_id}] Restoring from snapshot {snapshot_id}")
             
-            # Restore local state
             with self.lock:
                 self.files = {}
                 for fname, fdata in snapshot_data["local_state"].items():
@@ -681,6 +666,7 @@ def run_server(
 
 
 if __name__ == "__main__":
+    # This __main__ block is from your existing FileServer.py
     parser = argparse.ArgumentParser(description="FileServer with Leader Election")
     parser.add_argument("--id", type=str, required=True, help="Server ID")
     parser.add_argument("--port", type=int, required=True, help="Port")

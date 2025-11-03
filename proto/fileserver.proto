@@ -2,59 +2,50 @@ syntax = "proto3";
 
 package fileserver;
 
-// FileServer service - matches client expectations
-// This is your AFS server with leader election and snapshots
 service FileServer {
-  // Client-facing file operations (what your client.py expects)
-  rpc FetchFile (FetchRequest) returns (FetchResponse);
-  rpc UploadFile (UploadRequest) returns (UploadResponse);
-  
-  // Leader election and heartbeat
+  rpc FetchFile(MetaData) returns (stream FetchResponse);
+  rpc UploadFile(stream UploadRequest) returns (UploadResponse);
+  rpc RetrieveFileList(RetrieveFileListRequest) returns (RetrieveFileListResponse);
+
   rpc RequestVote (VoteRequest) returns (VoteResponse);
   rpc Heartbeat (HeartbeatRequest) returns (HeartbeatResponse);
-  
-  // Replication (server-to-server)
   rpc ReplicateFile (ReplicateFileRequest) returns (ReplicateFileResponse);
-  
-  // Chandy-Lamport Snapshot
   rpc InitiateSnapshot (SnapshotRequest) returns (SnapshotResponse);
   rpc Marker (MarkerMessage) returns (MarkerResponse);
   rpc GetSnapshot (GetSnapshotRequest) returns (GetSnapshotResponse);
   rpc RestoreFromSnapshot (RestoreRequest) returns (RestoreResponse);
 }
 
-// ============================================================================
-// CLIENT-FACING FILE OPERATIONS (Match your client.py expectations)
-// ============================================================================
-
-// FetchFile - Get entire file (AFS semantics: whole-file caching)
-message FetchRequest {
+message MetaData {
   string filename = 1;
+  string extension = 2;
 }
 
 message FetchResponse {
   bool success = 1;
-  bytes file_data = 2;           // Entire file contents
+  bytes file_data = 2;
   string error_message = 3;
-  int64 version = 4;             // File version for concurrency control
 }
 
-// UploadFile - Store entire file (AFS semantics: whole-file write)
 message UploadRequest {
-  string filename = 1;
-  bytes file_data = 2;           // Entire file contents
-  int64 expected_version = 3;    // Optional: for optimistic concurrency
+  oneof request {
+    MetaData metadata = 1;
+    bytes file_data = 2;
+  }
 }
 
 message UploadResponse {
   bool success = 1;
   string error_message = 2;
-  int64 new_version = 3;         // Updated version after upload
 }
 
-// ============================================================================
-// LEADER ELECTION
-// ============================================================================
+message RetrieveFileListRequest {
+  string data_type = 1;
+}
+
+message RetrieveFileListResponse {
+  map<int32, MetaData> file_list = 1;
+}
 
 message VoteRequest {
   int64 term = 1;
@@ -78,10 +69,6 @@ message HeartbeatResponse {
   bool success = 2;
 }
 
-// ============================================================================
-// REPLICATION (Server-to-Server)
-// ============================================================================
-
 message ReplicateFileRequest {
   string filename = 1;
   bytes contents = 2;
@@ -91,10 +78,6 @@ message ReplicateFileRequest {
 message ReplicateFileResponse {
   string error = 1;
 }
-
-// ============================================================================
-// CHANDY-LAMPORT SNAPSHOT
-// ============================================================================
 
 message SnapshotRequest {
   string snapshot_id = 1;
