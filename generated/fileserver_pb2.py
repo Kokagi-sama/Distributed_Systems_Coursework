@@ -24,29 +24,25 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x66ileserver.proto\x12\nfileserver\"J\n\rFetchResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x11\n\tfile_data\x18\x02 \x01(\x0c\x12\x15\n\rerror_message\x18\x03 \x01(\t\"Y\n\rUploadRequest\x12(\n\x08metadata\x18\x01 \x01(\x0b\x32\x14.fileserver.MetaDataH\x00\x12\x13\n\tfile_data\x18\x02 \x01(\x0cH\x00\x42\t\n\x07request\"8\n\x0eUploadResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rerror_message\x18\x02 \x01(\t\"/\n\x08MetaData\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x11\n\textension\x18\x02 \x01(\t\",\n\x17RetrieveFileListRequest\x12\x11\n\tdata_type\x18\x01 \x01(\t\"\xa8\x01\n\x18RetrieveFileListResponse\x12\x45\n\tfile_list\x18\x01 \x03(\x0b\x32\x32.fileserver.RetrieveFileListResponse.FileListEntry\x1a\x45\n\rFileListEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12#\n\x05value\x18\x02 \x01(\x0b\x32\x14.fileserver.MetaData:\x02\x38\x01\x32\xf2\x01\n\nFileServer\x12>\n\tFetchFile\x12\x14.fileserver.MetaData\x1a\x19.fileserver.FetchResponse0\x01\x12\x45\n\nUploadFile\x12\x19.fileserver.UploadRequest\x1a\x1a.fileserver.UploadResponse(\x01\x12]\n\x10RetrieveFileList\x12#.fileserver.RetrieveFileListRequest\x1a$.fileserver.RetrieveFileListResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x66ileserver.proto\x12\nfileserver\" \n\x0c\x46\x65tchRequest\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\"W\n\tFileChunk\x12,\n\x08metadata\x18\x01 \x01(\x0b\x32\x18.fileserver.FileMetadataH\x00\x12\x14\n\nchunk_data\x18\x02 \x01(\x0cH\x00\x42\x06\n\x04\x64\x61ta\"3\n\x0c\x46ileMetadata\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x11\n\tfile_size\x18\x02 \x01(\x03\"8\n\x0eUploadResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rerror_message\x18\x02 \x01(\t\"\x12\n\x10ListFilesRequest\"&\n\x11ListFilesResponse\x12\x11\n\tfilenames\x18\x01 \x03(\t2\xd9\x01\n\nFileServer\x12>\n\tFetchFile\x12\x18.fileserver.FetchRequest\x1a\x15.fileserver.FileChunk0\x01\x12\x41\n\nUploadFile\x12\x15.fileserver.FileChunk\x1a\x1a.fileserver.UploadResponse(\x01\x12H\n\tListFiles\x12\x1c.fileserver.ListFilesRequest\x1a\x1d.fileserver.ListFilesResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'fileserver_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_RETRIEVEFILELISTRESPONSE_FILELISTENTRY']._loaded_options = None
-  _globals['_RETRIEVEFILELISTRESPONSE_FILELISTENTRY']._serialized_options = b'8\001'
-  _globals['_FETCHRESPONSE']._serialized_start=32
-  _globals['_FETCHRESPONSE']._serialized_end=106
-  _globals['_UPLOADREQUEST']._serialized_start=108
-  _globals['_UPLOADREQUEST']._serialized_end=197
-  _globals['_UPLOADRESPONSE']._serialized_start=199
-  _globals['_UPLOADRESPONSE']._serialized_end=255
-  _globals['_METADATA']._serialized_start=257
-  _globals['_METADATA']._serialized_end=304
-  _globals['_RETRIEVEFILELISTREQUEST']._serialized_start=306
-  _globals['_RETRIEVEFILELISTREQUEST']._serialized_end=350
-  _globals['_RETRIEVEFILELISTRESPONSE']._serialized_start=353
-  _globals['_RETRIEVEFILELISTRESPONSE']._serialized_end=521
-  _globals['_RETRIEVEFILELISTRESPONSE_FILELISTENTRY']._serialized_start=452
-  _globals['_RETRIEVEFILELISTRESPONSE_FILELISTENTRY']._serialized_end=521
-  _globals['_FILESERVER']._serialized_start=524
-  _globals['_FILESERVER']._serialized_end=766
+  _globals['_FETCHREQUEST']._serialized_start=32
+  _globals['_FETCHREQUEST']._serialized_end=64
+  _globals['_FILECHUNK']._serialized_start=66
+  _globals['_FILECHUNK']._serialized_end=153
+  _globals['_FILEMETADATA']._serialized_start=155
+  _globals['_FILEMETADATA']._serialized_end=206
+  _globals['_UPLOADRESPONSE']._serialized_start=208
+  _globals['_UPLOADRESPONSE']._serialized_end=264
+  _globals['_LISTFILESREQUEST']._serialized_start=266
+  _globals['_LISTFILESREQUEST']._serialized_end=284
+  _globals['_LISTFILESRESPONSE']._serialized_start=286
+  _globals['_LISTFILESRESPONSE']._serialized_end=324
+  _globals['_FILESERVER']._serialized_start=327
+  _globals['_FILESERVER']._serialized_end=544
 # @@protoc_insertion_point(module_scope)

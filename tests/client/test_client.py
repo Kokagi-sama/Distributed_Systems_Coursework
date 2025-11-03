@@ -26,13 +26,20 @@ def test_process_file(temp_test_file):
     client = Client("test-client", "localhost:50051")
 
     file_content = temp_test_file.read_bytes()
-    fetch_response = fileserver_pb2.FetchResponse(
-        success=True, file_data=file_content, error_message=""
-    )
+
+    # Mock streaming download
+    fetch_chunks = [
+        fileserver_pb2.FileChunk(
+            metadata=fileserver_pb2.FileMetadata(
+                filename="test_numbers.txt", file_size=len(file_content)
+            )
+        ),
+        fileserver_pb2.FileChunk(chunk_data=file_content),
+    ]
     upload_response = fileserver_pb2.UploadResponse(success=True, error_message="")
 
     mock_stub = MagicMock()
-    mock_stub.FetchFile.return_value = fetch_response
+    mock_stub.FetchFile.return_value = iter(fetch_chunks)
     mock_stub.UploadFile.return_value = upload_response
 
     with patch("grpc.insecure_channel"):
@@ -54,7 +61,7 @@ def test_request_task_with_mock():
         has_task=True,
         task_type=coordinator_pb2.FIND_PRIMES,
         filename="test.txt",
-        fileserver_address="localhost:50052",
+        primary_fileserver_addr="localhost:50052",
     )
     client.coordinator.RequestTask = Mock(return_value=mock_response)
 
@@ -64,7 +71,7 @@ def test_request_task_with_mock():
     assert task.has_task is True
     assert task.task_type == coordinator_pb2.FIND_PRIMES
     assert task.filename == "test.txt"
-    assert task.fileserver_address == "localhost:50052"
+    assert task.primary_fileserver_addr == "localhost:50052"
 
 
 def test_complete_task_with_mock():
@@ -113,11 +120,16 @@ def test_fetch_file_with_mock():
     client = Client("test-client", "localhost:50051")
 
     file_content = b"17\n19\n23\n29\n31\n"
-    mock_response = fileserver_pb2.FetchResponse(
-        success=True, file_data=file_content, error_message=""
-    )
+    fetch_chunks = [
+        fileserver_pb2.FileChunk(
+            metadata=fileserver_pb2.FileMetadata(
+                filename="test.txt", file_size=len(file_content)
+            )
+        ),
+        fileserver_pb2.FileChunk(chunk_data=file_content),
+    ]
     mock_stub = MagicMock()
-    mock_stub.FetchFile.return_value = mock_response
+    mock_stub.FetchFile.return_value = iter(fetch_chunks)
 
     with patch("grpc.insecure_channel"):
         with patch(
@@ -135,11 +147,16 @@ def test_fetch_file_from_cache():
     client = Client("test-client", "localhost:50051")
 
     file_content = b"2\n3\n5\n7\n"
-    mock_response = fileserver_pb2.FetchResponse(
-        success=True, file_data=file_content, error_message=""
-    )
+    fetch_chunks = [
+        fileserver_pb2.FileChunk(
+            metadata=fileserver_pb2.FileMetadata(
+                filename="test.txt", file_size=len(file_content)
+            )
+        ),
+        fileserver_pb2.FileChunk(chunk_data=file_content),
+    ]
     mock_stub = MagicMock()
-    mock_stub.FetchFile.return_value = mock_response
+    mock_stub.FetchFile.return_value = iter(fetch_chunks)
 
     with patch("grpc.insecure_channel"):
         with patch(
@@ -150,3 +167,48 @@ def test_fetch_file_from_cache():
 
     assert filepath1 == filepath2
     assert mock_stub.FetchFile.call_count == 1
+
+
+def test_merge_files():
+    """Test merging two deduplicated prime files."""
+    client = Client("test-client", "localhost:50051")
+
+    # First file: 2, 3, 5, 7
+    file1_content = b"2\n3\n5\n7\n"
+    fetch_chunks1 = [
+        fileserver_pb2.FileChunk(
+            metadata=fileserver_pb2.FileMetadata(
+                filename="file1_primes.txt", file_size=len(file1_content)
+            )
+        ),
+        fileserver_pb2.FileChunk(chunk_data=file1_content),
+    ]
+
+    # Second file: 5, 7, 11, 13 (has duplicates with file1)
+    file2_content = b"5\n7\n11\n13\n"
+    fetch_chunks2 = [
+        fileserver_pb2.FileChunk(
+            metadata=fileserver_pb2.FileMetadata(
+                filename="file2_primes.txt", file_size=len(file2_content)
+            )
+        ),
+        fileserver_pb2.FileChunk(chunk_data=file2_content),
+    ]
+
+    upload_response = fileserver_pb2.UploadResponse(success=True, error_message="")
+
+    mock_stub = MagicMock()
+    mock_stub.FetchFile.side_effect = [iter(fetch_chunks1), iter(fetch_chunks2)]
+    mock_stub.UploadFile.return_value = upload_response
+
+    with patch("grpc.insecure_channel"):
+        with patch(
+            "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
+        ):
+            success = client.merge_files(
+                "file1_primes.txt", "file2_primes.txt", "task123", "localhost:50052"
+            )
+
+    assert success is True
+    assert mock_stub.FetchFile.call_count == 2
+    assert mock_stub.UploadFile.call_count == 1
