@@ -211,6 +211,46 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             success=True, error_message=""
         )
 
+    def RetrieveFileList(
+            self, request: fileserver_pb2.RetrieveFileListRequest, context: grpc.ServicerContext
+        ) -> fileserver_pb2.RetrieveFileListResponse:
+            """
+            Returns a map of <int, MetaData> for all files stored on the server.
+            This implementation ignores the request.data_type field for now.
+            """
+            print(f"[{self.server_id}] RetrieveFileList request")
+            
+            file_list_map = {}
+            file_id_counter = 0
+            
+            with self.lock:
+                # Get all filenames (keys) from the files dictionary
+                all_filenames = list(self.files.keys())
+            
+            for f in all_filenames:
+                try:
+                    # Split the full filename back into stem and extension
+                    p = Path(f)
+                    filename_stem = p.stem
+                    extension = p.suffix  # This will include the dot, e.g., ".txt"
+                    
+                    # Populate the map <int32, MetaData>
+                    file_list_map[file_id_counter] = fileserver_pb2.MetaData(
+                        filename=filename_stem,
+                        extension=extension
+                    )
+                    file_id_counter += 1
+                    
+                except Exception as e:
+                    # This might happen if a filename is unusual, e.g., ".something"
+                    print(f"[{self.server_id}] Warning: could not parse filename '{f}': {e}")
+
+            print(f"[{self.server_id}] Returning {len(file_list_map)} filenames.")
+            
+            # This matches the 'map<int32, MetaData> file_list = 1;' in your .proto
+            return fileserver_pb2.RetrieveFileListResponse(
+                file_list=file_list_map
+            )
     # ========================================================================
     # LEADER ELECTION
     # ========================================================================
