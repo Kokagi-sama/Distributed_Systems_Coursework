@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package afs; 
+
+service FileService {
+  // AFS-style file operations
+  rpc Create (CreateRequest) returns (CreateResponse);
+  rpc Fetch (FetchRequest) returns (FetchResponse);  // Replaces Open+Read
+  rpc Store (StoreRequest) returns (StoreResponse);  // Replaces Write+Close
+  rpc Delete (DeleteRequest) returns (DeleteResponse);
+  
+  // Leader election and heartbeat
+  rpc RequestVote (VoteRequest) returns (VoteResponse);
+  rpc Heartbeat (HeartbeatRequest) returns (HeartbeatResponse);
+  
+  // Replication (server-to-server)
+  rpc ReplicateFile (ReplicateFileRequest) returns (ReplicateFileResponse);
+}
+
+// Create
+message CreateRequest {
+  string filename = 1;
+}
+message CreateResponse {
+  string error = 1;
+}
+
+// Fetch (AFS: get entire file)
+message FetchRequest {
+  string filename = 1;
+  bool create_if_missing = 2;
+}
+message FetchResponse {
+  bytes contents = 1;
+  int64 version = 2;
+  string error = 3;
+}
+
+// Store (AFS: write entire file back)
+message StoreRequest {
+  string filename = 1;
+  bytes contents = 2;
+  int64 expected_version = 3;  // For optimistic concurrency control
+}
+message StoreResponse {
+  int64 new_version = 1;
+  string error = 2;
+}
+
+// Delete
+message DeleteRequest {
+  string filename = 1;
+}
+message DeleteResponse {
+  string error = 1;
+}
+
+// Leader Election - RequestVote
+message VoteRequest {
+  int64 term = 1;
+  string candidate_id = 2;
+  int64 last_log_index = 3;
+  int64 last_log_term = 4;
+}
+message VoteResponse {
+  int64 term = 1;
+  bool vote_granted = 2;
+}
+
+// Heartbeat
+message HeartbeatRequest {
+  int64 term = 1;
+  string leader_id = 2;
+}
+message HeartbeatResponse {
+  int64 term = 1;
+  bool success = 2;
+}
+
+// ReplicateFile (for server-to-server file sync)
+message ReplicateFileRequest {
+  string filename = 1;
+  bytes contents = 2;
+  int64 version = 3;
+}
+message ReplicateFileResponse {
+  string error = 1;
+}

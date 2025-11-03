@@ -1,0 +1,148 @@
+syntax = "proto3";
+
+package fileserver;
+
+// FileServer service - matches client expectations
+// This is your AFS server with leader election and snapshots
+service FileServer {
+  // Client-facing file operations (what your client.py expects)
+  rpc FetchFile (FetchRequest) returns (FetchResponse);
+  rpc UploadFile (UploadRequest) returns (UploadResponse);
+  
+  // Leader election and heartbeat
+  rpc RequestVote (VoteRequest) returns (VoteResponse);
+  rpc Heartbeat (HeartbeatRequest) returns (HeartbeatResponse);
+  
+  // Replication (server-to-server)
+  rpc ReplicateFile (ReplicateFileRequest) returns (ReplicateFileResponse);
+  
+  // Chandy-Lamport Snapshot
+  rpc InitiateSnapshot (SnapshotRequest) returns (SnapshotResponse);
+  rpc Marker (MarkerMessage) returns (MarkerResponse);
+  rpc GetSnapshot (GetSnapshotRequest) returns (GetSnapshotResponse);
+  rpc RestoreFromSnapshot (RestoreRequest) returns (RestoreResponse);
+}
+
+// ============================================================================
+// CLIENT-FACING FILE OPERATIONS (Match your client.py expectations)
+// ============================================================================
+
+// FetchFile - Get entire file (AFS semantics: whole-file caching)
+message FetchRequest {
+  string filename = 1;
+}
+
+message FetchResponse {
+  bool success = 1;
+  bytes file_data = 2;           // Entire file contents
+  string error_message = 3;
+  int64 version = 4;             // File version for concurrency control
+}
+
+// UploadFile - Store entire file (AFS semantics: whole-file write)
+message UploadRequest {
+  string filename = 1;
+  bytes file_data = 2;           // Entire file contents
+  int64 expected_version = 3;    // Optional: for optimistic concurrency
+}
+
+message UploadResponse {
+  bool success = 1;
+  string error_message = 2;
+  int64 new_version = 3;         // Updated version after upload
+}
+
+// ============================================================================
+// LEADER ELECTION
+// ============================================================================
+
+message VoteRequest {
+  int64 term = 1;
+  string candidate_id = 2;
+  int64 last_log_index = 3;
+  int64 last_log_term = 4;
+}
+
+message VoteResponse {
+  int64 term = 1;
+  bool vote_granted = 2;
+}
+
+message HeartbeatRequest {
+  int64 term = 1;
+  string leader_id = 2;
+}
+
+message HeartbeatResponse {
+  int64 term = 1;
+  bool success = 2;
+}
+
+// ============================================================================
+// REPLICATION (Server-to-Server)
+// ============================================================================
+
+message ReplicateFileRequest {
+  string filename = 1;
+  bytes contents = 2;
+  int64 version = 3;
+}
+
+message ReplicateFileResponse {
+  string error = 1;
+}
+
+// ============================================================================
+// CHANDY-LAMPORT SNAPSHOT
+// ============================================================================
+
+message SnapshotRequest {
+  string snapshot_id = 1;
+  string initiator_id = 2;
+}
+
+message SnapshotResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message MarkerMessage {
+  string snapshot_id = 1;
+  string sender_id = 2;
+  string channel_id = 3;
+}
+
+message MarkerResponse {
+  bool success = 1;
+}
+
+message FileState {
+  string filename = 1;
+  bytes contents = 2;
+  int64 version = 3;
+}
+
+message ChannelState {
+  string channel_id = 1;
+  repeated FileState messages = 2;
+}
+
+message GetSnapshotRequest {
+  string snapshot_id = 1;
+}
+
+message GetSnapshotResponse {
+  string snapshot_id = 1;
+  repeated FileState local_state = 2;
+  repeated ChannelState channel_states = 3;
+  bool is_complete = 4;
+}
+
+message RestoreRequest {
+  string snapshot_id = 1;
+}
+
+message RestoreResponse {
+  bool success = 1;
+  string error = 2;
+}

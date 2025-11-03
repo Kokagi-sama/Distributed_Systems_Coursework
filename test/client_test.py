@@ -127,7 +127,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test primary-follower replication.")
     parser.add_argument("--primary", type=str, default="localhost:50051",
                         help="Address of the Primary server")
-    parser.add_argument("--follower", type=str, default="localhost:50052",
+    parser.add_argument("--follower", type=str, default="localhost:50053",
                         help="Address of the Follower server")
     args = parser.parse_args()
 
