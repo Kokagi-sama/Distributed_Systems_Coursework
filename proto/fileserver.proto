@@ -3,26 +3,35 @@ syntax = "proto3";
 package fileserver;
 
 service FileServer {
-    rpc FetchFile(FetchRequest) returns (FetchResponse);
-    rpc UploadFile(UploadRequest) returns (UploadResponse);
+    rpc FetchFile(FetchRequest) returns (stream FileChunk);
+    rpc UploadFile(stream FileChunk) returns (UploadResponse);
+    rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
 }
 
 message FetchRequest {
     string filename = 1;
 }
 
-message FetchResponse {
-    bool success = 1;
-    bytes file_data = 2;
-    string error_message = 3;
+// First chunk has metadata, rest have chunk_data
+message FileChunk {
+    oneof data {
+        FileMetadata metadata = 1;
+        bytes chunk_data = 2;
+    }
 }
 
-message UploadRequest {
+message FileMetadata {
     string filename = 1;
-    bytes file_data = 2;
+    int64 file_size = 2;
 }
 
 message UploadResponse {
     bool success = 1;
     string error_message = 2;
+}
+
+message ListFilesRequest {}
+
+message ListFilesResponse {
+    repeated string filenames = 1;
 }

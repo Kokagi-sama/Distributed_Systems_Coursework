@@ -38,11 +38,41 @@ class Client:
         print(f"[{client_id}] Client initialized")
         print(f"[{client_id}] Cache directory: {self.cache_dir}")
 
+    def _stream_upload(
+        self, filepath: Path, remote_filename: str, chunk_size: int = 65536
+    ):
+        """Read local file and generate chunks for upload to file server."""
+        file_size = filepath.stat().st_size
+
+        # Send metadata first
+        metadata = fileserver_pb2.FileMetadata(
+            filename=remote_filename, file_size=file_size
+        )
+        yield fileserver_pb2.FileChunk(metadata=metadata)
+
+        # Then send file data in chunks
+        with open(filepath, "rb") as f:
+            while True:
+                chunk_data = f.read(chunk_size)
+                if not chunk_data:
+                    break
+                yield fileserver_pb2.FileChunk(chunk_data=chunk_data)
+
+    def _stream_fetch(self, chunk_stream, output_path: Path):
+        """Receive chunks from file server and write to local file."""
+        with open(output_path, "wb") as f:
+            for chunk in chunk_stream:
+                if chunk.HasField("metadata"):
+                    # Skip metadata chunk
+                    continue
+                elif chunk.HasField("chunk_data"):
+                    f.write(chunk.chunk_data)
+
     def _fetch_file(self, filename: str, fileserver_address: str) -> Path:
         """Fetch file from file server and cache it locally."""
         # Return cached version if available
         if filename in self.cached_files:
-            print(f"[{self.client_id}] Using cached version of {filename}")
+            print(f"[{self.client_id}] Using cached {filename}")
             return self.cached_files[filename]
 
         # Connect to file server
@@ -52,20 +82,19 @@ class Client:
 
         # Request file via RPC
         request = fileserver_pb2.FetchRequest(filename=filename)
-        response = fileserver_stub.FetchFile(request)
+        chunk_stream = fileserver_stub.FetchFile(request)
 
-        if not response.success:
-            raise FileNotFoundError(
-                f"File {filename} not found: {response.error_message}"
-            )
+        # Save to local cache
+        cached_path = self.cache_dir / Path(filename).name
+
+        try:
+            self._stream_fetch(chunk_stream, cached_path)
+        except grpc.RpcError as e:
+            raise FileNotFoundError(f"File {filename} not found: {e}")
 
         print(
             f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}"
         )
-
-        # Save to local cache
-        cached_path = self.cache_dir / Path(filename).name
-        cached_path.write_bytes(response.file_data)
 
         self.cached_files[filename] = cached_path
         print(f"[{self.client_id}] Cached {filename} locally")
@@ -78,18 +107,13 @@ class Client:
         print(f"[{self.client_id}] Uploading {remote_filename} to {fileserver_address}")
 
         try:
-            # Read local file data
-            file_data = local_filepath.read_bytes()
-
             # Connect to file server
             fileserver_channel = grpc.insecure_channel(fileserver_address)
             fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
 
             # Upload file via RPC
-            request = fileserver_pb2.UploadRequest(
-                filename=remote_filename, file_data=file_data
-            )
-            response = fileserver_stub.UploadFile(request)
+            chunk_iterator = self._stream_upload(local_filepath, remote_filename)
+            response = fileserver_stub.UploadFile(chunk_iterator)
 
             if not response.success:
                 print(f"[{self.client_id}] Upload failed: {response.error_message}")
@@ -286,10 +310,12 @@ class Client:
                     print(f"[{self.client_id}] Task details:")
                     print(f"[{self.client_id}]   File: {task.filename}")
                     print(
-                        f"[{self.client_id}]   File server: {task.fileserver_address}"
+                        f"[{self.client_id}]   Primary server: {task.primary_fileserver_addr}"
                     )
 
-                    success = self.process_file(task.filename, task.fileserver_address)
+                    success = self.process_file(
+                        task.filename, task.primary_fileserver_addr
+                    )
                     task_id = task.filename
 
                 elif task.task_type == coordinator_pb2.MERGE:
@@ -298,11 +324,14 @@ class Client:
                     print(f"[{self.client_id}]   File 1: {task.file1}")
                     print(f"[{self.client_id}]   File 2: {task.file2}")
                     print(
-                        f"[{self.client_id}]   File server: {task.fileserver_address}"
+                        f"[{self.client_id}]   Primary server: {task.primary_fileserver_addr}"
                     )
 
                     success = self.merge_files(
-                        task.file1, task.file2, task.task_id, task.fileserver_address
+                        task.file1,
+                        task.file2,
+                        task.task_id,
+                        task.primary_fileserver_addr,
                     )
                     task_id = task.task_id
 
