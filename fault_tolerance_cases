@@ -1,0 +1,61 @@
+Client 
+    - There would be multiple client workers 
+    - Client workers are the least dependable --> assuming they, any time, can crash, lose network, randomly shut down etc.
+
+    1. Client completes the processes, uploaded the file to Primary File Server successfully, but crashes before informing the Coordinator that the task has been completed.
+        - [Task Timeout @ Coordinator] Since there is a persistent heartbeat from Client Worker to Coordinator, Coordinator can time out the task when heartbeat is lost, re-queue the task, and assign the task to a new client.
+
+        - [Allows File Overwrite @ File Server] A new Client processing the same task will be allowed to upload the same output file to Primary File Server.
+
+    2. Client is in midst uploading the file to Primary File Server, but network is lost or Primary File Server crashes.
+        - [Heartbeat to Primary File Server @ Client] Client establishes a heartbeat/ping to Primary File Server while uploading. 
+        - [Probe for new Primary File Server from Coordinator] If the heartbeat is lost (e.g., zombie connection), or the next package gets thrown into exception, then Client should probe Coordinator for the new Primary File Server and attempts to re-upload the whole file. @File Server has to allow overwriting of the same file name.
+            - Downsides: Client will "hang" at uploading and will not be able to take on new tasks - note that we are not implementing multi-threading.
+
+    3. The client downloads the file locally. If the client crashes, while downloading, it is assumed that the previous download could be corrupted.
+        - [Re-download upon start up @ Client] Client can simply re-download the file when it restarts (or when a new client picks up the re-queued task), ignoring the download status previously.
+        
+        - [Checkpoint @ Client] Client periodically inform its partial progress to the File Server.
+
+==
+
+Coordinator - one node
+
+    1. Client starts up with a heartbeat to Coordinator
+        - @Coordinator needs to keep an awareness to the heartbeats from Client Workers.
+        - In the event that this heartbeat is broken, Coordinator can wait for x duration (e.g., 5 mins) before assuming that the task assigned to Client can no longer be completed and re-queue for tasking to the next worker.
+
+    2. Coordinator has to persist its state since it is managing the tasks.
+        - [Write-Ahead Log @ Coordinator] Persists which tasks are assigned to which Client, which tasks are in progress, etc. (or else it will not be able to time out tasks - Coordinator should not wait infinitely for Client to complete task - i.e., should not wait infinitely for the Client's task completion call to it).
+    
+    3. Coordinator crashes
+        - [Resume previous state after recovery @ Coordinator] Need to be able to retrieve these state after restart - presumably there is only 1 Coordinator node.
+    
+    4. HA for Coordinator
+        - [Replica @Coordinator] To consider the need for replica for Coordinator - if so, Replica Coordinator takes over immediately as primary if the previous one crashes
+            - This means that there is need for the 2 nodes to sync state
+        - Only Primary Coordinator can task to Clients
+        - [2 Heartbeats to Coordinators @Client] Initial Primary Coordinator can be assumed, but there needs for new gRPC calls for the new Primary to inform Client that it has taken over as the Primary.
+
+==
+
+File Server - one primary node, three replica nodes
+
+    1. Ensure Majority Data Replication across File Server nodes
+        - [Condition for an upload from Client to be considered successful @File Server] A file upload should not be considered "successful" until the file has been written to a quorum (e.g., 2 out of 3) of file servers. This protects against a single server or disk failure, i.e., Primary File Server must have gRPC calls with the other File Server nodes, and until the new file has been replicated to majority of the Replica File Server nodes, Primary File Server can then reply to Client that the upload was successful.
+
+    2. Data Integrity - What are the chances of files getting corrupted in transit?
+        - @Coordinator provide checksum of the raw file as well when giving assigning task to Client. Client downloads and verifies this hash before processing.
+        
+        - Similarly, when @Client uploads the processed file, it should provide the checksum of the new file. The File Server should verify this hash upon receipt before confirming the upload.
+
+==
+
+Network Faults
+
+    1. Wrap all All gRPC calls (get task, download, upload, heartbeat, complete) in a retry loop with exponential backoff and jitter. This prevents a client from immediately hammering a service that is temporarily down.
+
+    2. We will assume hardcoded ip addresses in this design - although usually service discovery is used.
+
+    3. To avoid hanging the Client forever - e.g., when Coordinator and File Servers are all unresponsive, set timeout on all gRPC calls. A deadline being exceeded is a failure that can be caught by the retry loop. If retries also fail, the Client can assume the service is down and either back off entirely or terminate.
+        - Can maintain the continuous heartbeat but not requesting for tasks etc. until a service comes back.
