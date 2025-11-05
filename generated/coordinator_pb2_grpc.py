@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import coordinator_pb2 as coordinator__pb2
+import coordinator_pb2 as coordinator__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -36,18 +36,28 @@ class CoordinatorStub(object):
         """
         self.RequestTask = channel.unary_unary(
                 '/coordinator.Coordinator/RequestTask',
-                request_serializer=coordinator__pb2.TaskRequest.SerializeToString,
-                response_deserializer=coordinator__pb2.TaskResponse.FromString,
+                request_serializer=coordinator__pb2.TaskStatusRequest.SerializeToString,
+                response_deserializer=coordinator__pb2.TaskStatusResponse.FromString,
                 _registered_method=True)
-        self.CompleteTask = channel.unary_unary(
-                '/coordinator.Coordinator/CompleteTask',
-                request_serializer=coordinator__pb2.TaskCompletionRequest.SerializeToString,
-                response_deserializer=coordinator__pb2.TaskCompletionResponse.FromString,
+        self.UpdateTaskStatus = channel.unary_unary(
+                '/coordinator.Coordinator/UpdateTaskStatus',
+                request_serializer=coordinator__pb2.TaskStatusRequest.SerializeToString,
+                response_deserializer=coordinator__pb2.TaskStatusResponse.FromString,
                 _registered_method=True)
         self.SendHeartbeat = channel.unary_unary(
                 '/coordinator.Coordinator/SendHeartbeat',
                 request_serializer=coordinator__pb2.HeartbeatRequest.SerializeToString,
                 response_deserializer=coordinator__pb2.HeartbeatResponse.FromString,
+                _registered_method=True)
+        self.UpdatePrimaryFileServer = channel.unary_unary(
+                '/coordinator.Coordinator/UpdatePrimaryFileServer',
+                request_serializer=coordinator__pb2.PrimaryFileServerAddr.SerializeToString,
+                response_deserializer=coordinator__pb2.PrimaryFileServer.FromString,
+                _registered_method=True)
+        self.CheckNewPrimaryFileServer = channel.unary_unary(
+                '/coordinator.Coordinator/CheckNewPrimaryFileServer',
+                request_serializer=coordinator__pb2.PrimaryFileServer.SerializeToString,
+                response_deserializer=coordinator__pb2.PrimaryFileServerAddr.FromString,
                 _registered_method=True)
 
 
@@ -60,7 +70,7 @@ class CoordinatorServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def CompleteTask(self, request, context):
+    def UpdateTaskStatus(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -72,23 +82,47 @@ class CoordinatorServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UpdatePrimaryFileServer(self, request, context):
+        """TODO: For new Primary File Server to inform Coordinator
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CheckNewPrimaryFileServer(self, request, context):
+        """TODO: For Client to probe for new Primary File Server
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_CoordinatorServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'RequestTask': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestTask,
-                    request_deserializer=coordinator__pb2.TaskRequest.FromString,
-                    response_serializer=coordinator__pb2.TaskResponse.SerializeToString,
+                    request_deserializer=coordinator__pb2.TaskStatusRequest.FromString,
+                    response_serializer=coordinator__pb2.TaskStatusResponse.SerializeToString,
             ),
-            'CompleteTask': grpc.unary_unary_rpc_method_handler(
-                    servicer.CompleteTask,
-                    request_deserializer=coordinator__pb2.TaskCompletionRequest.FromString,
-                    response_serializer=coordinator__pb2.TaskCompletionResponse.SerializeToString,
+            'UpdateTaskStatus': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateTaskStatus,
+                    request_deserializer=coordinator__pb2.TaskStatusRequest.FromString,
+                    response_serializer=coordinator__pb2.TaskStatusResponse.SerializeToString,
             ),
             'SendHeartbeat': grpc.unary_unary_rpc_method_handler(
                     servicer.SendHeartbeat,
                     request_deserializer=coordinator__pb2.HeartbeatRequest.FromString,
                     response_serializer=coordinator__pb2.HeartbeatResponse.SerializeToString,
+            ),
+            'UpdatePrimaryFileServer': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdatePrimaryFileServer,
+                    request_deserializer=coordinator__pb2.PrimaryFileServerAddr.FromString,
+                    response_serializer=coordinator__pb2.PrimaryFileServer.SerializeToString,
+            ),
+            'CheckNewPrimaryFileServer': grpc.unary_unary_rpc_method_handler(
+                    servicer.CheckNewPrimaryFileServer,
+                    request_deserializer=coordinator__pb2.PrimaryFileServer.FromString,
+                    response_serializer=coordinator__pb2.PrimaryFileServerAddr.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -116,8 +150,8 @@ class Coordinator(object):
             request,
             target,
             '/coordinator.Coordinator/RequestTask',
-            coordinator__pb2.TaskRequest.SerializeToString,
-            coordinator__pb2.TaskResponse.FromString,
+            coordinator__pb2.TaskStatusRequest.SerializeToString,
+            coordinator__pb2.TaskStatusResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -129,7 +163,7 @@ class Coordinator(object):
             _registered_method=True)
 
     @staticmethod
-    def CompleteTask(request,
+    def UpdateTaskStatus(request,
             target,
             options=(),
             channel_credentials=None,
@@ -142,9 +176,9 @@ class Coordinator(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/coordinator.Coordinator/CompleteTask',
-            coordinator__pb2.TaskCompletionRequest.SerializeToString,
-            coordinator__pb2.TaskCompletionResponse.FromString,
+            '/coordinator.Coordinator/UpdateTaskStatus',
+            coordinator__pb2.TaskStatusRequest.SerializeToString,
+            coordinator__pb2.TaskStatusResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -172,6 +206,60 @@ class Coordinator(object):
             '/coordinator.Coordinator/SendHeartbeat',
             coordinator__pb2.HeartbeatRequest.SerializeToString,
             coordinator__pb2.HeartbeatResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdatePrimaryFileServer(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/coordinator.Coordinator/UpdatePrimaryFileServer',
+            coordinator__pb2.PrimaryFileServerAddr.SerializeToString,
+            coordinator__pb2.PrimaryFileServer.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CheckNewPrimaryFileServer(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/coordinator.Coordinator/CheckNewPrimaryFileServer',
+            coordinator__pb2.PrimaryFileServer.SerializeToString,
+            coordinator__pb2.PrimaryFileServerAddr.FromString,
             options,
             channel_credentials,
             insecure,

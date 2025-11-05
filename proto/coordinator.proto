@@ -2,10 +2,22 @@ syntax = "proto3";
 
 package coordinator;
 
+enum ClientTaskStatus {
+    IDLE = 0;
+    TASKED = 1;
+    IN_PROGRESS = 2;
+    COMPLETED = 3;
+    FAILED = 4;
+}
+
 service Coordinator {
-    rpc RequestTask(TaskRequest) returns (TaskResponse);
-    rpc CompleteTask(TaskCompletionRequest) returns (TaskCompletionResponse);
+    rpc RequestTask(TaskStatusRequest) returns (TaskStatusResponse);
+    rpc UpdateTaskStatus(TaskStatusRequest) returns (TaskStatusResponse);
+
     rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+    rpc UpdatePrimaryFileServer(PrimaryFileServerAddr) returns (PrimaryFileServer); //TODO: For new Primary File Server to inform Coordinator
+    rpc CheckNewPrimaryFileServer(PrimaryFileServer) returns (PrimaryFileServerAddr); //TODO: For Client to probe for new Primary File Server
 }
 
 enum TaskType {
@@ -13,11 +25,13 @@ enum TaskType {
     MERGE = 1;
 }
 
-message TaskRequest {
+message TaskStatusRequest {
     string client_id = 1;
+    ClientTaskStatus client_task_status = 2;
 }
 
-message TaskResponse {
+message TaskStatusResponse {
+    string task_id = 5;
     bool has_task = 1;
     TaskType task_type = 2;
     string primary_fileserver_addr = 3;
@@ -26,7 +40,6 @@ message TaskResponse {
     string filename = 4;
 
     // For MERGE task:
-    string task_id = 5;
     string file1 = 6;
     string file2 = 7;
 }
@@ -47,3 +60,9 @@ message HeartbeatRequest {
 message HeartbeatResponse {
     bool acknowledged = 1;
 }
+
+message PrimaryFileServerAddr {
+    string primary_fileserver_addr = 1;
+}
+
+message PrimaryFileServer {}
