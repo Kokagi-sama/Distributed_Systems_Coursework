@@ -21,14 +21,16 @@ message TaskResponse {
     bool has_task = 1;
     TaskType task_type = 2;
     string primary_fileserver_addr = 3;
+    string task_id = 4;
 
     // For FIND_PRIMES task:
-    string filename = 4;
+    string filename = 5;
+    int64 start_index = 6;
+    int64 end_index = 7;
 
     // For MERGE task:
-    string task_id = 5;
-    string file1 = 6;
-    string file2 = 7;
+    string file1 = 8;
+    string file2 = 9;
 }
 
 message TaskCompletionRequest {

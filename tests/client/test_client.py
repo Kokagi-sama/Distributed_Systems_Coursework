@@ -14,6 +14,18 @@ def temp_test_file(tmp_path):
     return test_file
 
 
+def create_upload_capturer():
+    """Create a function that captures uploaded chunks."""
+    uploaded_data = []
+
+    def capture_upload(chunk_iterator):
+        for chunk in chunk_iterator:
+            uploaded_data.append(chunk)
+        return fileserver_pb2.UploadResponse(success=True, error_message="")
+
+    return capture_upload, uploaded_data
+
+
 def test_client_initialization():
     """Test client initializes correctly."""
     client = Client("test-client", "localhost:50051")
@@ -22,12 +34,12 @@ def test_client_initialization():
 
 
 def test_process_file(temp_test_file):
-    """Test processing entire file with mock file server."""
+    """Test processing full file."""
     client = Client("test-client", "localhost:50051")
 
     file_content = temp_test_file.read_bytes()
+    capture_upload, uploaded_data = create_upload_capturer()
 
-    # Mock streaming download
     fetch_chunks = [
         fileserver_pb2.FileChunk(
             metadata=fileserver_pb2.FileMetadata(
@@ -36,19 +48,26 @@ def test_process_file(temp_test_file):
         ),
         fileserver_pb2.FileChunk(chunk_data=file_content),
     ]
-    upload_response = fileserver_pb2.UploadResponse(success=True, error_message="")
 
     mock_stub = MagicMock()
     mock_stub.FetchFile.return_value = iter(fetch_chunks)
-    mock_stub.UploadFile.return_value = upload_response
+    mock_stub.UploadFile.side_effect = capture_upload
 
     with patch("grpc.insecure_channel"):
         with patch(
             "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
         ):
-            success = client.process_file(str(temp_test_file.name), "localhost:50052")
+            success = client.process_file(
+                str(temp_test_file.name), "localhost:50052", 0, 16
+            )
+
+    result_data = b"".join(
+        chunk.chunk_data for chunk in uploaded_data if chunk.HasField("chunk_data")
+    )
+    result_numbers = [int(line) for line in result_data.decode().strip().split("\n")]
 
     assert success is True
+    assert result_numbers == [17, 19, 23, 29, 31]
     assert mock_stub.FetchFile.call_count == 1
     assert mock_stub.UploadFile.call_count == 1
 
@@ -169,11 +188,51 @@ def test_fetch_file_from_cache():
     assert mock_stub.FetchFile.call_count == 1
 
 
-def test_merge_files():
-    """Test merging two deduplicated prime files."""
+def test_process_file_partial_range(temp_test_file):
+    """Test processing partial line range."""
     client = Client("test-client", "localhost:50051")
 
-    # First file: 2, 3, 5, 7
+    file_content = temp_test_file.read_bytes()
+    capture_upload, uploaded_data = create_upload_capturer()
+
+    fetch_chunks = [
+        fileserver_pb2.FileChunk(
+            metadata=fileserver_pb2.FileMetadata(
+                filename="test_numbers.txt", file_size=len(file_content)
+            )
+        ),
+        fileserver_pb2.FileChunk(chunk_data=file_content),
+    ]
+
+    mock_stub = MagicMock()
+    mock_stub.FetchFile.return_value = iter(fetch_chunks)
+    mock_stub.UploadFile.side_effect = capture_upload
+
+    with patch("grpc.insecure_channel"):
+        with patch(
+            "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
+        ):
+            success = client.process_file(
+                str(temp_test_file.name), "localhost:50052", 5, 10
+            )
+
+    result_data = b"".join(
+        chunk.chunk_data for chunk in uploaded_data if chunk.HasField("chunk_data")
+    )
+    result_numbers = [int(line) for line in result_data.decode().strip().split("\n")]
+
+    assert success is True
+    assert result_numbers == [23]
+    assert mock_stub.FetchFile.call_count == 1
+    assert mock_stub.UploadFile.call_count == 1
+
+
+def test_merge_files():
+    """Test merging two prime files."""
+    client = Client("test-client", "localhost:50051")
+
+    capture_upload, uploaded_data = create_upload_capturer()
+
     file1_content = b"2\n3\n5\n7\n"
     fetch_chunks1 = [
         fileserver_pb2.FileChunk(
@@ -184,7 +243,6 @@ def test_merge_files():
         fileserver_pb2.FileChunk(chunk_data=file1_content),
     ]
 
-    # Second file: 5, 7, 11, 13 (has duplicates with file1)
     file2_content = b"5\n7\n11\n13\n"
     fetch_chunks2 = [
         fileserver_pb2.FileChunk(
@@ -195,11 +253,9 @@ def test_merge_files():
         fileserver_pb2.FileChunk(chunk_data=file2_content),
     ]
 
-    upload_response = fileserver_pb2.UploadResponse(success=True, error_message="")
-
     mock_stub = MagicMock()
     mock_stub.FetchFile.side_effect = [iter(fetch_chunks1), iter(fetch_chunks2)]
-    mock_stub.UploadFile.return_value = upload_response
+    mock_stub.UploadFile.side_effect = capture_upload
 
     with patch("grpc.insecure_channel"):
         with patch(
@@ -209,6 +265,12 @@ def test_merge_files():
                 "file1_primes.txt", "file2_primes.txt", "task123", "localhost:50052"
             )
 
+    result_data = b"".join(
+        chunk.chunk_data for chunk in uploaded_data if chunk.HasField("chunk_data")
+    )
+    result_numbers = [int(line) for line in result_data.decode().strip().split("\n")]
+
     assert success is True
+    assert result_numbers == [2, 3, 5, 7, 11, 13]
     assert mock_stub.FetchFile.call_count == 2
     assert mock_stub.UploadFile.call_count == 1

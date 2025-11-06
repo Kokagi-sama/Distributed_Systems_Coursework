@@ -128,8 +128,14 @@ class Client:
             print(f"[{self.client_id}] Upload error: {e}")
             return False
 
-    def process_file(self, filename: str, fileserver_address: str) -> bool:
-        """Process file to find primes, deduplicate, and upload result to file server."""
+    def process_file(
+        self,
+        filename: str,
+        fileserver_address: str,
+        start_index: int,
+        end_index: int,
+    ) -> bool:
+        """Process specific line range of file to find primes, deduplicate, and upload result."""
         try:
             # Get input file
             filepath = self._fetch_file(filename, fileserver_address)
@@ -137,13 +143,23 @@ class Client:
             print(f"[{self.client_id}] Error: {e}")
             return False
 
-        print(f"[{self.client_id}] Started processing {filename}")
+        print(
+            f"[{self.client_id}] Started processing {filename} from line {start_index} to {end_index - 1}"
+        )
 
         # Find and deduplicate primes
         primes = set()
 
         with open(filepath, "r") as f:
             for line_num, line in enumerate(f):
+                # Skip lines before start_index
+                if line_num < start_index:
+                    continue
+
+                # Stop when reaching end_index
+                if line_num >= end_index:
+                    break
+
                 line = line.strip()
                 if not line:
                     continue
@@ -159,11 +175,13 @@ class Client:
                     continue
 
         print(
-            f"[{self.client_id}] Finished processing: found {len(primes):,} unique primes"
+            f"[{self.client_id}] Finished processing {filename}: found {len(primes):,} unique primes from line {start_index} to {end_index - 1}"
         )
 
         # Write sorted primes to local file
-        result_filename = f"{Path(filename).stem}_primes.txt"
+        result_filename = (
+            f"{Path(filename).stem}_range_{start_index}_{end_index}_primes.txt"
+        )
         result_path = self.cache_dir / result_filename
 
         with open(result_path, "w") as f:
@@ -308,15 +326,22 @@ class Client:
 
                 if task.task_type == coordinator_pb2.FIND_PRIMES:
                     print(f"[{self.client_id}] Task details:")
+                    print(f"[{self.client_id}]   Task ID: {task.task_id}")
                     print(f"[{self.client_id}]   File: {task.filename}")
+                    print(
+                        f"[{self.client_id}]   Line range: {task.start_index} to {task.end_index - 1}"
+                    )
                     print(
                         f"[{self.client_id}]   Primary server: {task.primary_fileserver_addr}"
                     )
 
                     success = self.process_file(
-                        task.filename, task.primary_fileserver_addr
+                        task.filename,
+                        task.primary_fileserver_addr,
+                        task.start_index,
+                        task.end_index,
                     )
-                    task_id = task.filename
+                    task_id = task.task_id
 
                 elif task.task_type == coordinator_pb2.MERGE:
                     print(f"[{self.client_id}] Task details:")

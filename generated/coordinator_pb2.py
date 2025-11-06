@@ -24,27 +24,27 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11\x63oordinator.proto\x12\x0b\x63oordinator\" \n\x0bTaskRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\xac\x01\n\x0cTaskResponse\x12\x10\n\x08has_task\x18\x01 \x01(\x08\x12(\n\ttask_type\x18\x02 \x01(\x0e\x32\x15.coordinator.TaskType\x12\x1f\n\x17primary_fileserver_addr\x18\x03 \x01(\t\x12\x10\n\x08\x66ilename\x18\x04 \x01(\t\x12\x0f\n\x07task_id\x18\x05 \x01(\t\x12\r\n\x05\x66ile1\x18\x06 \x01(\t\x12\r\n\x05\x66ile2\x18\x07 \x01(\t\";\n\x15TaskCompletionRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\x12\x0f\n\x07task_id\x18\x02 \x01(\t\".\n\x16TaskCompletionResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"%\n\x10HeartbeatRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\")\n\x11HeartbeatResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08*&\n\x08TaskType\x12\x0f\n\x0b\x46IND_PRIMES\x10\x00\x12\t\n\x05MERGE\x10\x01\x32\xfa\x01\n\x0b\x43oordinator\x12\x42\n\x0bRequestTask\x12\x18.coordinator.TaskRequest\x1a\x19.coordinator.TaskResponse\x12W\n\x0c\x43ompleteTask\x12\".coordinator.TaskCompletionRequest\x1a#.coordinator.TaskCompletionResponse\x12N\n\rSendHeartbeat\x12\x1d.coordinator.HeartbeatRequest\x1a\x1e.coordinator.HeartbeatResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11\x63oordinator.proto\x12\x0b\x63oordinator\" \n\x0bTaskRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\xd4\x01\n\x0cTaskResponse\x12\x10\n\x08has_task\x18\x01 \x01(\x08\x12(\n\ttask_type\x18\x02 \x01(\x0e\x32\x15.coordinator.TaskType\x12\x1f\n\x17primary_fileserver_addr\x18\x03 \x01(\t\x12\x0f\n\x07task_id\x18\x04 \x01(\t\x12\x10\n\x08\x66ilename\x18\x05 \x01(\t\x12\x13\n\x0bstart_index\x18\x06 \x01(\x03\x12\x11\n\tend_index\x18\x07 \x01(\x03\x12\r\n\x05\x66ile1\x18\x08 \x01(\t\x12\r\n\x05\x66ile2\x18\t \x01(\t\";\n\x15TaskCompletionRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\x12\x0f\n\x07task_id\x18\x02 \x01(\t\".\n\x16TaskCompletionResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"%\n\x10HeartbeatRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\")\n\x11HeartbeatResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08*&\n\x08TaskType\x12\x0f\n\x0b\x46IND_PRIMES\x10\x00\x12\t\n\x05MERGE\x10\x01\x32\xfa\x01\n\x0b\x43oordinator\x12\x42\n\x0bRequestTask\x12\x18.coordinator.TaskRequest\x1a\x19.coordinator.TaskResponse\x12W\n\x0c\x43ompleteTask\x12\".coordinator.TaskCompletionRequest\x1a#.coordinator.TaskCompletionResponse\x12N\n\rSendHeartbeat\x12\x1d.coordinator.HeartbeatRequest\x1a\x1e.coordinator.HeartbeatResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'coordinator_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_TASKTYPE']._serialized_start=434
-  _globals['_TASKTYPE']._serialized_end=472
+  _globals['_TASKTYPE']._serialized_start=474
+  _globals['_TASKTYPE']._serialized_end=512
   _globals['_TASKREQUEST']._serialized_start=34
   _globals['_TASKREQUEST']._serialized_end=66
   _globals['_TASKRESPONSE']._serialized_start=69
-  _globals['_TASKRESPONSE']._serialized_end=241
-  _globals['_TASKCOMPLETIONREQUEST']._serialized_start=243
-  _globals['_TASKCOMPLETIONREQUEST']._serialized_end=302
-  _globals['_TASKCOMPLETIONRESPONSE']._serialized_start=304
-  _globals['_TASKCOMPLETIONRESPONSE']._serialized_end=350
-  _globals['_HEARTBEATREQUEST']._serialized_start=352
-  _globals['_HEARTBEATREQUEST']._serialized_end=389
-  _globals['_HEARTBEATRESPONSE']._serialized_start=391
-  _globals['_HEARTBEATRESPONSE']._serialized_end=432
-  _globals['_COORDINATOR']._serialized_start=475
-  _globals['_COORDINATOR']._serialized_end=725
+  _globals['_TASKRESPONSE']._serialized_end=281
+  _globals['_TASKCOMPLETIONREQUEST']._serialized_start=283
+  _globals['_TASKCOMPLETIONREQUEST']._serialized_end=342
+  _globals['_TASKCOMPLETIONRESPONSE']._serialized_start=344
+  _globals['_TASKCOMPLETIONRESPONSE']._serialized_end=390
+  _globals['_HEARTBEATREQUEST']._serialized_start=392
+  _globals['_HEARTBEATREQUEST']._serialized_end=429
+  _globals['_HEARTBEATRESPONSE']._serialized_start=431
+  _globals['_HEARTBEATRESPONSE']._serialized_end=472
+  _globals['_COORDINATOR']._serialized_start=515
+  _globals['_COORDINATOR']._serialized_end=765
 # @@protoc_insertion_point(module_scope)
