@@ -36,8 +36,8 @@ class CoordinatorStub(object):
         """
         self.RequestTask = channel.unary_unary(
                 '/coordinator.Coordinator/RequestTask',
-                request_serializer=coordinator__pb2.TaskStatusRequest.SerializeToString,
-                response_deserializer=coordinator__pb2.TaskStatusResponse.FromString,
+                request_serializer=coordinator__pb2.TaskRequest.SerializeToString,
+                response_deserializer=coordinator__pb2.TaskResponse.FromString,
                 _registered_method=True)
         self.UpdateTaskStatus = channel.unary_unary(
                 '/coordinator.Coordinator/UpdateTaskStatus',
@@ -77,8 +77,8 @@ def add_CoordinatorServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'RequestTask': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestTask,
-                    request_deserializer=coordinator__pb2.TaskStatusRequest.FromString,
-                    response_serializer=coordinator__pb2.TaskStatusResponse.SerializeToString,
+                    request_deserializer=coordinator__pb2.TaskRequest.FromString,
+                    response_serializer=coordinator__pb2.TaskResponse.SerializeToString,
             ),
             'UpdateTaskStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.UpdateTaskStatus,
@@ -116,8 +116,8 @@ class Coordinator(object):
             request,
             target,
             '/coordinator.Coordinator/RequestTask',
-            coordinator__pb2.TaskStatusRequest.SerializeToString,
-            coordinator__pb2.TaskStatusResponse.FromString,
+            coordinator__pb2.TaskRequest.SerializeToString,
+            coordinator__pb2.TaskResponse.FromString,
             options,
             channel_credentials,
             insecure,

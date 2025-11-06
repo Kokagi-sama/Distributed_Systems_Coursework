@@ -45,9 +45,7 @@ class Client:
         file_size = filepath.stat().st_size
 
         # Send metadata first
-        metadata = fileserver_pb2.FileMetadata(
-            filename=remote_filename, file_size=file_size
-        )
+        metadata = fileserver_pb2.FileMetadata(filename=remote_filename, file_size=file_size)
         yield fileserver_pb2.FileChunk(metadata=metadata)
 
         # Then send file data in chunks
@@ -119,9 +117,7 @@ class Client:
                 print(f"[{self.client_id}] Upload failed: {response.error_message}")
                 return False
 
-            print(
-                f"[{self.client_id}] Successfully uploaded {remote_filename} to {fileserver_address}"
-            )
+            print(f"[{self.client_id}] Successfully uploaded {remote_filename} to {fileserver_address}")
             return True
 
         except Exception as e:
