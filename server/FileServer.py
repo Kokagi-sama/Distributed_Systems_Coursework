@@ -1,6 +1,5 @@
 """
 FileServer with AFS semantics, Leader Election, and Chandy-Lamport Snapshots
-
 Implements:
 - FetchFile (Server-Streaming): Get file in chunks
 - UploadFile (Client-Streaming): Store file from chunks
@@ -9,7 +8,6 @@ Implements:
 - File replication across nodes
 - Physical file storage on disk
 """
-
 import argparse
 import grpc
 from concurrent import futures
@@ -40,6 +38,7 @@ STATE_LEADER: str = "LEADER"
 class FileServer(fileserver_pb2_grpc.FileServerServicer):
     """
     FileServer with Leader Election and Snapshots
+    Optimized: RAM stores only metadata; data read from disk on-demand.
     """
     
     def __init__(
@@ -49,17 +48,16 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         port: int,
         storage_dir: str = "./fileserver_storage",
     ) -> None:
-        # File storage
-        # Type: Dict[filename, {"data": bytes, "version": int}]
+        # File storage - RAM ONLY HOLDS METADATA
+        # Type: Dict[filename, {"version": int}]
         self.files: Dict[str, Dict[str, Any]] = {}
         self.lock: threading.Lock = threading.Lock()
         
         # Storage directory for persistence
-        # MODIFIED: Append server_id to path to prevent local conflicts
         self.storage_dir: Path = Path(storage_dir) / server_id
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
-        # MODIFIED: Dedicated subdirectory for snapshots
+        # Dedicated subdirectory for snapshots
         self.snapshot_dir: Path = self.storage_dir / "snapshots"
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
         
@@ -94,7 +92,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         self.election_thread.start()
         self.heartbeat_thread.start()
         
-        print(f"[{server_id}] FileServer initialized")
+        print(f"[{server_id}] FileServer initialized (RAM optimized)")
         print(f"[{server_id}] Storage: {self.storage_dir}")
         print(f"[{server_id}] Snapshots: {self.snapshot_dir}")
         print(f"[{server_id}] Peers: {peers}")
@@ -111,9 +109,19 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         try:
             with open(file_path, 'wb') as f:
                 f.write(data)
-            print(f"[{self.server_id}] Wrote to disk: {file_path}")
+            print(f"[{self.server_id}] Wrote to disk: {file_path} ({len(data)} bytes)")
         except Exception as e:
             print(f"[{self.server_id}] Disk write failed for {filename}: {e}")
+
+    def _read_from_disk(self, filename: str) -> bytes:
+        """Helper to read file data from disk on-demand"""
+        file_path = self.storage_dir / filename
+        try:
+            with open(file_path, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            print(f"[{self.server_id}] Disk read failed for {filename}: {e}")
+            return b""
     
     # ========================================================================
     # CLIENT-FACING FILE OPERATIONS
@@ -124,26 +132,33 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     ) -> Iterator[fileserver_pb2.FetchResponse]:
         """
         Fetch file in chunks (Server-Streaming RPC).
+        Reads from disk on-demand.
         """
-        # Reconstruct filename from MetaData
         filename = f"{request.filename}{request.extension}"
-        
         print(f"[{self.server_id}] FetchFile (streaming) request: {filename}")
         
+        # 1. Check metadata in RAM
         with self.lock:
             if filename not in self.files:
-                print(f"[{self.server_id}] File not found: {filename}")
-                # Send one error message and stop
+                print(f"[{self.server_id}] File not found in RAM: {filename}")
                 yield fileserver_pb2.FetchResponse(
                     success=False,
                     error_message=f"File not found: {filename}",
                 )
-                return  # Stop the generator
-            
-            # Get file data from internal storage
-            file_data = self.files[filename]["data"]
+                return
         
-        # Send the file in 1MB chunks
+        # 2. Read data from disk 
+        file_data = self._read_from_disk(filename)
+        
+        if not file_data and filename in self.files:
+             # Edge case: Metadata exists but file corrupted/missing on disk
+             yield fileserver_pb2.FetchResponse(
+                 success=False, 
+                 error_message="Data corruption: File missing from disk"
+             )
+             return
+        
+        # 3. Stream the data
         chunk_size = 1024 * 1024  # 1MB
         for i in range(0, len(file_data), chunk_size):
             chunk = file_data[i : i + chunk_size]
@@ -158,8 +173,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         self, request_iterator: Iterator[fileserver_pb2.UploadRequest], context: grpc.ServicerContext
     ) -> fileserver_pb2.UploadResponse:
         """
-        Upload/Store file from chunks (Client-Streaming RPC).
-        Only leader can accept writes!
+        Upload/Store file from chunks. Writes directly to disk, updates RAM metadata.
         """
         print(f"[{self.server_id}] UploadFile (streaming) request received...")
         
@@ -167,9 +181,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         file_chunks = []
         
         try:
-            # 1. Loop over the client's stream
             for request in request_iterator:
-                # Check the 'oneof' field to see what kind of data this is
                 if request.HasField("metadata"):
                     if metadata is not None:
                         raise ValueError("Client sent metadata twice")
@@ -188,45 +200,34 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 success=False, error_message=str(e)
             )
 
-        # 2. Reassemble the file
         filename = f"{metadata.filename}{metadata.extension}"
         file_data = b"".join(file_chunks)
         
         print(f"[{self.server_id}] Stream complete for {filename} ({len(file_data)} bytes)")
         
-        # 3. Acquire lock and perform the write (if leader)
         with self.lock:
-            # Check if we're the leader
             if not self._is_leader():
-                error_msg = (
-                    f"Not leader. Current leader: {self.leader_id or 'unknown'}"
-                )
+                error_msg = f"Not leader. Current leader: {self.leader_id or 'unknown'}"
                 print(f"[{self.server_id}] Rejected upload: {error_msg}")
                 return fileserver_pb2.UploadResponse(
                     success=False, error_message=error_msg
                 )
             
-            # Write to physical disk
+            # 1. Write to physical disk
             self._write_to_disk(filename, file_data)
 
-            # Internal versioning logic is maintained for replication,
-            # even though the client-facing API no longer uses it.
+            # 2. Update RAM metadata
             if filename in self.files:
-                # Update existing file
-                self.files[filename]["data"] = file_data
                 self.files[filename]["version"] += 1
-                new_version = self.files[filename]["version"]
             else:
-                # Create new file
-                self.files[filename] = {"data": file_data, "version": 1}
-                new_version = 1
+                self.files[filename] = {"version": 1}
             
+            new_version = self.files[filename]["version"]
             print(f"[{self.server_id}] Stored {filename} (version {new_version})")
         
-        # 4. Replicate to followers
+        # Replicate to followers
         self._replicate_to_followers(filename)
         
-        # 5. Send the single response
         return fileserver_pb2.UploadResponse(
             success=True, error_message=""
         )
@@ -236,7 +237,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         ) -> fileserver_pb2.RetrieveFileListResponse:
             """
             Returns a map of <int, MetaData> for all files stored on the server.
-            This implementation ignores the request.data_type field for now.
             """
             print(f"[{self.server_id}] RetrieveFileList request")
             
@@ -244,33 +244,24 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             file_id_counter = 0
             
             with self.lock:
-                # Get all filenames (keys) from the files dictionary
                 all_filenames = list(self.files.keys())
             
             for f in all_filenames:
                 try:
-                    # Split the full filename back into stem and extension
                     p = Path(f)
-                    filename_stem = p.stem
-                    extension = p.suffix  # This will include the dot, e.g., ".txt"
-                    
-                    # Populate the map <int32, MetaData>
                     file_list_map[file_id_counter] = fileserver_pb2.MetaData(
-                        filename=filename_stem,
-                        extension=extension
+                        filename=p.stem,
+                        extension=p.suffix
                     )
                     file_id_counter += 1
-                    
                 except Exception as e:
-                    # This might happen if a filename is unusual, e.g., ".something"
                     print(f"[{self.server_id}] Warning: could not parse filename '{f}': {e}")
 
             print(f"[{self.server_id}] Returning {len(file_list_map)} filenames.")
-            
-            # This matches the 'map<int32, MetaData> file_list = 1;' in your .proto
             return fileserver_pb2.RetrieveFileListResponse(
                 file_list=file_list_map
             )
+            
     # ========================================================================
     # LEADER ELECTION
     # ========================================================================
@@ -434,7 +425,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         self, filename: str, file_data: bytes, version: int
     ) -> Iterator[fileserver_pb2.ReplicateFileRequest]:
         """Generator for streaming file replication."""
-        
         # 1. Send metadata
         metadata = fileserver_pb2.ReplicateFileMetadata(
             filename=filename, version=version
@@ -452,23 +442,21 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         with self.lock:
             if filename not in self.files:
                 return
-            f = self.files[filename]
-            file_data = f["data"] 
-            version = f["version"]
+            version = self.files[filename]["version"]
+        
+        # Read full data from disk once for replication
+        file_data = self._read_from_disk(filename)
         
         for peer in self.peers:
             try:
-                
                 with grpc.insecure_channel(peer) as channel:
                     stub = fileserver_pb2_grpc.FileServerStub(channel)
                     
-                    
+                    # Create new generator for each peer
                     request_iterator = self._generate_replication_requests(
                         filename, file_data, version
                     )
-
                     stub.ReplicateFile(request_iterator, timeout=30.0) 
-            
             except Exception as e:
                 print(
                     f"[{self.server_id}] Replication to {peer} failed: {e}"
@@ -479,12 +467,10 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         request_iterator: Iterator[fileserver_pb2.ReplicateFileRequest],
         context: grpc.ServicerContext,
     ) -> fileserver_pb2.ReplicateFileResponse:
-        """Receive replicated file from leader (client-streaming)"""
+        """Receive replicated file from leader"""
         
         metadata: Optional[fileserver_pb2.ReplicateFileMetadata] = None
         file_chunks = []
-        filename = ""
-        version = 0
 
         try:
             for request in request_iterator:
@@ -492,11 +478,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                     if metadata is not None:
                         raise ValueError("Replication client sent metadata twice")
                     metadata = request.metadata
-                    filename = metadata.filename
-                    version = metadata.version
                 elif request.HasField("file_data"):
-                    if metadata is None:
-                        raise ValueError("Replication client sent file data before metadata")
                     file_chunks.append(request.file_data)
             
             if not metadata:
@@ -506,18 +488,19 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             print(f"[{self.server_id}] Error in replication stream: {e}")
             return fileserver_pb2.ReplicateFileResponse(error=str(e))
 
+        filename = metadata.filename
+        version = metadata.version
         file_data = b"".join(file_chunks)
 
         with self.lock:
             cur = self.files.get(filename)
             if cur is None or version > cur["version"]:
-                # Write to physical disk
+                # 1. Write to physical disk
                 self._write_to_disk(filename, file_data)
                 
-                self.files[filename] = {
-                    "data": file_data,
-                    "version": version,
-                }
+                # 2. Update RAM metadata
+                self.files[filename] = {"version": version}
+                
                 print(
                     f"[{self.server_id}] Replicated {filename} v{version} ({len(file_data)} bytes)"
                 )
@@ -533,6 +516,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         def __init__(self, snapshot_id: str, initiator_id: str) -> None:
             self.snapshot_id: str = snapshot_id
             self.initiator_id: str = initiator_id
+            # Contains FULL data, temporarily loaded from disk
             self.local_state: Optional[Dict[str, Dict[str, Any]]] = None
             self.channel_states: Dict[str, List[Any]] = {}
             self.markers_received: Set[str] = set()
@@ -557,11 +541,15 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             
             snapshot_state = self.SnapshotState(snapshot_id, initiator_id)
             
+            # CAPTURE STATE: Load FULL DATA from disk for the snapshot
             with self.lock:
-                snapshot_state.local_state = {
-                    fname: {"data": fdata["data"], "version": fdata["version"]}
-                    for fname, fdata in self.files.items()
-                }
+                snapshot_state.local_state = {}
+                for fname, meta in self.files.items():
+                    data = self._read_from_disk(fname)
+                    snapshot_state.local_state[fname] = {
+                        "data": data,
+                        "version": meta["version"]
+                    }
             
             print(
                 f"[{self.server_id}] Recorded local state: {len(snapshot_state.local_state)} files"
@@ -595,7 +583,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                         sender_id=self.server_id,
                         channel_id=f"{self.server_id}->{peer}",
                     )
-                    response = stub.Marker(marker, timeout=2.0)
+                    stub.Marker(marker, timeout=2.0)
                     print(
                         f"[{self.server_id}] Sent marker to {peer} for snapshot {snapshot_id}"
                     )
@@ -621,11 +609,17 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                     f"[{self.server_id}] First marker for snapshot {snapshot_id}"
                 )
                 snapshot_state = self.SnapshotState(snapshot_id, sender_id)
+                
+                # CAPTURE STATE on first marker (loading from disk)
                 with self.lock:
-                    snapshot_state.local_state = {
-                        fname: {"data": fdata["data"], "version": fdata["version"]}
-                        for fname, fdata in self.files.items()
-                    }
+                    snapshot_state.local_state = {}
+                    for fname, meta in self.files.items():
+                        data = self._read_from_disk(fname)
+                        snapshot_state.local_state[fname] = {
+                            "data": data,
+                            "version": meta["version"]
+                        }
+
                 for peer in self.peers:
                     ch_id = f"{peer}->{self.server_id}"
                     snapshot_state.recording_channels.add(ch_id)
@@ -665,12 +659,15 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 "channel_states": snapshot_state.channel_states,
             }
             
-            # MODIFIED: save snapshot file inside the server's DEDICATED SNAPSHOTS DIR
             filename = self.snapshot_dir / f"snapshot_{snapshot_id}_{self.server_id}.pkl"
             with open(filename, "wb") as f:
                 pickle.dump(snapshot_data, f)
             
             print(f"[{self.server_id}] Saved snapshot to {filename}")
+            
+            # Optional: clear heavy local_state from RAM after saving to disk
+            # snapshot_state.local_state = None 
+
         except Exception as e:
             print(f"[{self.server_id}] Error saving snapshot: {e}")
     
@@ -690,6 +687,8 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             
             snapshot_state = self.snapshots[snapshot_id]
             local_state_pb = []
+            
+            # snapshot_state.local_state might be None if we cleared it after saving
             if snapshot_state.local_state:
                 for fname, fdata in snapshot_state.local_state.items():
                     local_state_pb.append(
@@ -702,9 +701,10 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             
             channel_states_pb = []
             for ch_id, messages in snapshot_state.channel_states.items():
+                # Messages might be complex objects, simplify if needed for proto
                 channel_state = fileserver_pb2.ChannelState(
                     channel_id=ch_id,
-                    messages=[],
+                    messages=[], # omitted for brevity/complexity in this proto
                 )
                 channel_states_pb.append(channel_state)
             
@@ -724,7 +724,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         snapshot_id = request.snapshot_id
         
         try:
-            # MODIFIED: look for snapshot in the server's DEDICATED SNAPSHOTS DIR
             filename = self.snapshot_dir / f"snapshot_{snapshot_id}_{self.server_id}.pkl"
             with open(filename, "rb") as f:
                 snapshot_data = pickle.load(f)
@@ -734,13 +733,11 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             with self.lock:
                 self.files = {}
                 for fname, fdata in snapshot_data["local_state"].items():
-                    # Write to physical disk
+                    # 1. Restore physical file to disk
                     self._write_to_disk(fname, fdata["data"])
                     
-                    self.files[fname] = {
-                        "data": fdata["data"],
-                        "version": fdata["version"],
-                    }
+                    # 2. Restore ONLY metadata to RAM
+                    self.files[fname] = {"version": fdata["version"]}
             
             print(
                 f"[{self.server_id}] Restored {len(self.files)} files from snapshot"
@@ -765,7 +762,8 @@ def run_server(
     server_id: str, port: int, peers: List[str], storage_dir: str
 ) -> None:
     """Run the FileServer"""
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    # Increased max_workers for better concurrent handling of blocking disk I/O
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=20))
     
     servicer = FileServer(server_id, peers, port, storage_dir)
     fileserver_pb2_grpc.add_FileServerServicer_to_server(servicer, server)
