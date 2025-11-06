@@ -41,10 +41,6 @@ message TaskStatusResponse {
     string file1 = 6;
     string file2 = 7;
 
-    // FOR OUTPUT FILE:
-    string output_file = 9;
-    string checksum = 10;
-
     // FOR SPLIT TASK:
     int64 start_index = 12;
     int64 end_index = 13;
@@ -53,6 +49,10 @@ message TaskStatusResponse {
 message TaskCompletionRequest {
     string client_id = 1;
     string task_id = 2;
+    
+    // FOR OUTPUT FILE:
+    string output_file = 3;
+    string checksum = 4;
 }
 
 message TaskCompletionResponse {
