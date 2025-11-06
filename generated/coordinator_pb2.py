@@ -24,33 +24,33 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11\x63oordinator.proto\x12\x0b\x63oordinator\"a\n\x11TaskStatusRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\x12\x39\n\x12\x63lient_task_status\x18\x02 \x01(\x0e\x32\x1d.coordinator.ClientTaskStatus\"\xb2\x01\n\x12TaskStatusResponse\x12\x0f\n\x07task_id\x18\x05 \x01(\t\x12\x10\n\x08has_task\x18\x01 \x01(\x08\x12(\n\ttask_type\x18\x02 \x01(\x0e\x32\x15.coordinator.TaskType\x12\x1f\n\x17primary_fileserver_addr\x18\x03 \x01(\t\x12\x10\n\x08\x66ilename\x18\x04 \x01(\t\x12\r\n\x05\x66ile1\x18\x06 \x01(\t\x12\r\n\x05\x66ile2\x18\x07 \x01(\t\";\n\x15TaskCompletionRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\x12\x0f\n\x07task_id\x18\x02 \x01(\t\".\n\x16TaskCompletionResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"%\n\x10HeartbeatRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\")\n\x11HeartbeatResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"8\n\x15PrimaryFileServerAddr\x12\x1f\n\x17primary_fileserver_addr\x18\x01 \x01(\t\"\x13\n\x11PrimaryFileServer*T\n\x10\x43lientTaskStatus\x12\x08\n\x04IDLE\x10\x00\x12\n\n\x06TASKED\x10\x01\x12\x0f\n\x0bIN_PROGRESS\x10\x02\x12\r\n\tCOMPLETED\x10\x03\x12\n\n\x06\x46\x41ILED\x10\x04*&\n\x08TaskType\x12\x0f\n\x0b\x46IND_PRIMES\x10\x00\x12\t\n\x05MERGE\x10\x01\x32\xc2\x03\n\x0b\x43oordinator\x12N\n\x0bRequestTask\x12\x1e.coordinator.TaskStatusRequest\x1a\x1f.coordinator.TaskStatusResponse\x12S\n\x10UpdateTaskStatus\x12\x1e.coordinator.TaskStatusRequest\x1a\x1f.coordinator.TaskStatusResponse\x12N\n\rSendHeartbeat\x12\x1d.coordinator.HeartbeatRequest\x1a\x1e.coordinator.HeartbeatResponse\x12]\n\x17UpdatePrimaryFileServer\x12\".coordinator.PrimaryFileServerAddr\x1a\x1e.coordinator.PrimaryFileServer\x12_\n\x19\x43heckNewPrimaryFileServer\x12\x1e.coordinator.PrimaryFileServer\x1a\".coordinator.PrimaryFileServerAddrb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11\x63oordinator.proto\x12\x0b\x63oordinator\"a\n\x11TaskStatusRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\x12\x39\n\x12\x63lient_task_status\x18\x02 \x01(\x0e\x32\x1d.coordinator.ClientTaskStatus\"\xbc\x02\n\x12TaskStatusResponse\x12\x0f\n\x07task_id\x18\x05 \x01(\t\x12\x10\n\x08has_task\x18\x01 \x01(\x08\x12\x39\n\x12\x63lient_task_status\x18\x08 \x01(\x0e\x32\x1d.coordinator.ClientTaskStatus\x12(\n\ttask_type\x18\x02 \x01(\x0e\x32\x15.coordinator.TaskType\x12\x1f\n\x17primary_fileserver_addr\x18\x03 \x01(\t\x12\x10\n\x08\x66ilename\x18\x04 \x01(\t\x12\r\n\x05\x66ile1\x18\x06 \x01(\t\x12\r\n\x05\x66ile2\x18\x07 \x01(\t\x12\x13\n\x0boutput_file\x18\t \x01(\t\x12\x10\n\x08\x63hecksum\x18\n \x01(\t\x12\x13\n\x0bstart_index\x18\x0c \x01(\x03\x12\x11\n\tend_index\x18\r \x01(\x03\";\n\x15TaskCompletionRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\x12\x0f\n\x07task_id\x18\x02 \x01(\t\".\n\x16TaskCompletionResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"%\n\x10HeartbeatRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\")\n\x11HeartbeatResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"8\n\x15PrimaryFileServerAddr\x12\x1f\n\x17primary_fileserver_addr\x18\x01 \x01(\t\"\x13\n\x11PrimaryFileServer*H\n\x10\x43lientTaskStatus\x12\n\n\x06TASKED\x10\x00\x12\x0f\n\x0bIN_PROGRESS\x10\x01\x12\r\n\tCOMPLETED\x10\x02\x12\x08\n\x04WAIT\x10\x03*&\n\x08TaskType\x12\x0f\n\x0b\x46IND_PRIMES\x10\x00\x12\t\n\x05MERGE\x10\x01\x32\x82\x02\n\x0b\x43oordinator\x12N\n\x0bRequestTask\x12\x1e.coordinator.TaskStatusRequest\x1a\x1f.coordinator.TaskStatusResponse\x12S\n\x10UpdateTaskStatus\x12\x1e.coordinator.TaskStatusRequest\x1a\x1f.coordinator.TaskStatusResponse\x12N\n\rSendHeartbeat\x12\x1d.coordinator.HeartbeatRequest\x1a\x1e.coordinator.HeartbeatResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'coordinator_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_CLIENTTASKSTATUS']._serialized_start=584
-  _globals['_CLIENTTASKSTATUS']._serialized_end=668
-  _globals['_TASKTYPE']._serialized_start=670
-  _globals['_TASKTYPE']._serialized_end=708
+  _globals['_CLIENTTASKSTATUS']._serialized_start=722
+  _globals['_CLIENTTASKSTATUS']._serialized_end=794
+  _globals['_TASKTYPE']._serialized_start=796
+  _globals['_TASKTYPE']._serialized_end=834
   _globals['_TASKSTATUSREQUEST']._serialized_start=34
   _globals['_TASKSTATUSREQUEST']._serialized_end=131
   _globals['_TASKSTATUSRESPONSE']._serialized_start=134
-  _globals['_TASKSTATUSRESPONSE']._serialized_end=312
-  _globals['_TASKCOMPLETIONREQUEST']._serialized_start=314
-  _globals['_TASKCOMPLETIONREQUEST']._serialized_end=373
-  _globals['_TASKCOMPLETIONRESPONSE']._serialized_start=375
-  _globals['_TASKCOMPLETIONRESPONSE']._serialized_end=421
-  _globals['_HEARTBEATREQUEST']._serialized_start=423
-  _globals['_HEARTBEATREQUEST']._serialized_end=460
-  _globals['_HEARTBEATRESPONSE']._serialized_start=462
-  _globals['_HEARTBEATRESPONSE']._serialized_end=503
-  _globals['_PRIMARYFILESERVERADDR']._serialized_start=505
-  _globals['_PRIMARYFILESERVERADDR']._serialized_end=561
-  _globals['_PRIMARYFILESERVER']._serialized_start=563
-  _globals['_PRIMARYFILESERVER']._serialized_end=582
-  _globals['_COORDINATOR']._serialized_start=711
-  _globals['_COORDINATOR']._serialized_end=1161
+  _globals['_TASKSTATUSRESPONSE']._serialized_end=450
+  _globals['_TASKCOMPLETIONREQUEST']._serialized_start=452
+  _globals['_TASKCOMPLETIONREQUEST']._serialized_end=511
+  _globals['_TASKCOMPLETIONRESPONSE']._serialized_start=513
+  _globals['_TASKCOMPLETIONRESPONSE']._serialized_end=559
+  _globals['_HEARTBEATREQUEST']._serialized_start=561
+  _globals['_HEARTBEATREQUEST']._serialized_end=598
+  _globals['_HEARTBEATRESPONSE']._serialized_start=600
+  _globals['_HEARTBEATRESPONSE']._serialized_end=641
+  _globals['_PRIMARYFILESERVERADDR']._serialized_start=643
+  _globals['_PRIMARYFILESERVERADDR']._serialized_end=699
+  _globals['_PRIMARYFILESERVER']._serialized_start=701
+  _globals['_PRIMARYFILESERVER']._serialized_end=720
+  _globals['_COORDINATOR']._serialized_start=837
+  _globals['_COORDINATOR']._serialized_end=1095
 # @@protoc_insertion_point(module_scope)
