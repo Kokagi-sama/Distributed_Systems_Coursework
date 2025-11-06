@@ -2,23 +2,43 @@ syntax = "proto3";
 
 package coordinator;
 
-enum ClientTaskStatus {
-    TASKED = 0;
-    IN_PROGRESS = 1;
-    COMPLETED = 2;
-    WAIT = 3;
-}
-
 service Coordinator {
-    rpc RequestTask(TaskStatusRequest) returns (TaskStatusResponse);
+    rpc RequestTask(TaskRequest) returns (TaskResponse);
     rpc UpdateTaskStatus(TaskStatusRequest) returns (TaskStatusResponse);
 
     rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
 
+enum ClientTaskStatus {
+    COMPLETED = 0;
+    WAIT = 1;
+}
+
 enum TaskType {
     FIND_PRIMES = 0;
     MERGE = 1;
+}
+
+message TaskRequest {
+    string client_id = 1;
+}
+
+message TaskResponse {
+    string task_id = 1;
+    bool has_task = 2;
+    TaskType task_type = 3;
+    ClientTaskStatus client_task_status = 4;
+
+    // For FIND_PRIMES task:
+    string filename = 5;
+
+    // For MERGE task:
+    string file1 = 6;
+    string file2 = 7;
+
+    // FOR SPLIT task:
+    int64 start_index = 8;
+    int64 end_index = 9;
 }
 
 message TaskStatusRequest {
@@ -27,23 +47,8 @@ message TaskStatusRequest {
 }
 
 message TaskStatusResponse {
-    string task_id = 5;
-    bool has_task = 1;
-    ClientTaskStatus client_task_status = 8;
-
-    TaskType task_type = 2;
-    string primary_fileserver_addr = 3; // TODO: remove
-
-    // For FIND_PRIMES task:
-    string filename = 4;
-
-    // For MERGE task:
-    string file1 = 6;
-    string file2 = 7;
-
-    // FOR SPLIT TASK:
-    int64 start_index = 12;
-    int64 end_index = 13;
+    string task_id = 1;
+    bool acknowledged = 2;
 }
 
 message TaskCompletionRequest {
@@ -51,8 +56,7 @@ message TaskCompletionRequest {
     string task_id = 2;
     
     // FOR OUTPUT FILE:
-    string output_file = 3;
-    string checksum = 4;
+    string output_filename = 3;
 }
 
 message TaskCompletionResponse {
@@ -66,9 +70,3 @@ message HeartbeatRequest {
 message HeartbeatResponse {
     bool acknowledged = 1;
 }
-
-message PrimaryFileServerAddr {
-    string primary_fileserver_addr = 1;
-}
-
-message PrimaryFileServer {}

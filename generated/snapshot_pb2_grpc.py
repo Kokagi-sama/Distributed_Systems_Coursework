@@ -3,6 +3,7 @@
 import grpc
 import warnings
 
+import snapshot_pb2 as snapshot__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -22,3 +23,204 @@ if _version_not_supported:
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
     )
+
+
+class SnapshotStub(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.InitiateSnapshot = channel.unary_unary(
+                '/snapshot.Snapshot/InitiateSnapshot',
+                request_serializer=snapshot__pb2.SnapshotRequest.SerializeToString,
+                response_deserializer=snapshot__pb2.SnapshotResponse.FromString,
+                _registered_method=True)
+        self.Marker = channel.unary_unary(
+                '/snapshot.Snapshot/Marker',
+                request_serializer=snapshot__pb2.MarkerMessage.SerializeToString,
+                response_deserializer=snapshot__pb2.MarkerResponse.FromString,
+                _registered_method=True)
+        self.GetSnapshot = channel.unary_unary(
+                '/snapshot.Snapshot/GetSnapshot',
+                request_serializer=snapshot__pb2.GetSnapshotRequest.SerializeToString,
+                response_deserializer=snapshot__pb2.GetSnapshotResponse.FromString,
+                _registered_method=True)
+        self.RestoreFromSnapshot = channel.unary_unary(
+                '/snapshot.Snapshot/RestoreFromSnapshot',
+                request_serializer=snapshot__pb2.RestoreRequest.SerializeToString,
+                response_deserializer=snapshot__pb2.RestoreResponse.FromString,
+                _registered_method=True)
+
+
+class SnapshotServicer(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def InitiateSnapshot(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Marker(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetSnapshot(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RestoreFromSnapshot(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_SnapshotServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'InitiateSnapshot': grpc.unary_unary_rpc_method_handler(
+                    servicer.InitiateSnapshot,
+                    request_deserializer=snapshot__pb2.SnapshotRequest.FromString,
+                    response_serializer=snapshot__pb2.SnapshotResponse.SerializeToString,
+            ),
+            'Marker': grpc.unary_unary_rpc_method_handler(
+                    servicer.Marker,
+                    request_deserializer=snapshot__pb2.MarkerMessage.FromString,
+                    response_serializer=snapshot__pb2.MarkerResponse.SerializeToString,
+            ),
+            'GetSnapshot': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSnapshot,
+                    request_deserializer=snapshot__pb2.GetSnapshotRequest.FromString,
+                    response_serializer=snapshot__pb2.GetSnapshotResponse.SerializeToString,
+            ),
+            'RestoreFromSnapshot': grpc.unary_unary_rpc_method_handler(
+                    servicer.RestoreFromSnapshot,
+                    request_deserializer=snapshot__pb2.RestoreRequest.FromString,
+                    response_serializer=snapshot__pb2.RestoreResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'snapshot.Snapshot', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('snapshot.Snapshot', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class Snapshot(object):
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def InitiateSnapshot(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snapshot.Snapshot/InitiateSnapshot',
+            snapshot__pb2.SnapshotRequest.SerializeToString,
+            snapshot__pb2.SnapshotResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Marker(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snapshot.Snapshot/Marker',
+            snapshot__pb2.MarkerMessage.SerializeToString,
+            snapshot__pb2.MarkerResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSnapshot(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snapshot.Snapshot/GetSnapshot',
+            snapshot__pb2.GetSnapshotRequest.SerializeToString,
+            snapshot__pb2.GetSnapshotResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RestoreFromSnapshot(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snapshot.Snapshot/RestoreFromSnapshot',
+            snapshot__pb2.RestoreRequest.SerializeToString,
+            snapshot__pb2.RestoreResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)

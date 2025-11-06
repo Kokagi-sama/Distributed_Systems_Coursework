@@ -24,11 +24,33 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0esnapshot.protob\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0esnapshot.proto\x12\x08snapshot\"<\n\x0fSnapshotRequest\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\x12\x14\n\x0cinitiator_id\x18\x02 \x01(\t\"2\n\x10SnapshotResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\r\n\x05\x65rror\x18\x02 \x01(\t\"K\n\rMarkerMessage\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\x12\x11\n\tsender_id\x18\x02 \x01(\t\x12\x12\n\nchannel_id\x18\x03 \x01(\t\"!\n\x0eMarkerResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\"@\n\tFileState\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x10\n\x08\x63ontents\x18\x02 \x01(\x0c\x12\x0f\n\x07version\x18\x03 \x01(\x03\"I\n\x0c\x43hannelState\x12\x12\n\nchannel_id\x18\x01 \x01(\t\x12%\n\x08messages\x18\x02 \x03(\x0b\x32\x13.snapshot.FileState\")\n\x12GetSnapshotRequest\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\"\x99\x01\n\x13GetSnapshotResponse\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\x12(\n\x0blocal_state\x18\x02 \x03(\x0b\x32\x13.snapshot.FileState\x12.\n\x0e\x63hannel_states\x18\x03 \x03(\x0b\x32\x16.snapshot.ChannelState\x12\x13\n\x0bis_complete\x18\x04 \x01(\x08\"%\n\x0eRestoreRequest\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\"1\n\x0fRestoreResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\r\n\x05\x65rror\x18\x02 \x01(\t2\xaa\x02\n\x08Snapshot\x12I\n\x10InitiateSnapshot\x12\x19.snapshot.SnapshotRequest\x1a\x1a.snapshot.SnapshotResponse\x12;\n\x06Marker\x12\x17.snapshot.MarkerMessage\x1a\x18.snapshot.MarkerResponse\x12J\n\x0bGetSnapshot\x12\x1c.snapshot.GetSnapshotRequest\x1a\x1d.snapshot.GetSnapshotResponse\x12J\n\x13RestoreFromSnapshot\x12\x18.snapshot.RestoreRequest\x1a\x19.snapshot.RestoreResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'snapshot_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
+  _globals['_SNAPSHOTREQUEST']._serialized_start=28
+  _globals['_SNAPSHOTREQUEST']._serialized_end=88
+  _globals['_SNAPSHOTRESPONSE']._serialized_start=90
+  _globals['_SNAPSHOTRESPONSE']._serialized_end=140
+  _globals['_MARKERMESSAGE']._serialized_start=142
+  _globals['_MARKERMESSAGE']._serialized_end=217
+  _globals['_MARKERRESPONSE']._serialized_start=219
+  _globals['_MARKERRESPONSE']._serialized_end=252
+  _globals['_FILESTATE']._serialized_start=254
+  _globals['_FILESTATE']._serialized_end=318
+  _globals['_CHANNELSTATE']._serialized_start=320
+  _globals['_CHANNELSTATE']._serialized_end=393
+  _globals['_GETSNAPSHOTREQUEST']._serialized_start=395
+  _globals['_GETSNAPSHOTREQUEST']._serialized_end=436
+  _globals['_GETSNAPSHOTRESPONSE']._serialized_start=439
+  _globals['_GETSNAPSHOTRESPONSE']._serialized_end=592
+  _globals['_RESTOREREQUEST']._serialized_start=594
+  _globals['_RESTOREREQUEST']._serialized_end=631
+  _globals['_RESTORERESPONSE']._serialized_start=633
+  _globals['_RESTORERESPONSE']._serialized_end=682
+  _globals['_SNAPSHOT']._serialized_start=685
+  _globals['_SNAPSHOT']._serialized_end=983
 # @@protoc_insertion_point(module_scope)

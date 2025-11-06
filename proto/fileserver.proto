@@ -30,7 +30,7 @@ message FileMetadata {
 message UploadResponse {
     bool success = 1;
     string error_message = 2;
-    string new_primary_fileserver = 3; // TODO: added to allow new primary file server to inform client who is the new primary server
+    string new_primary_fileserver = 3;
 }
 
 message ListFilesRequest {}
