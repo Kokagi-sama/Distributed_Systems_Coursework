@@ -9,7 +9,7 @@ service FileServer {
 
   rpc RequestVote (VoteRequest) returns (VoteResponse);
   rpc Heartbeat (HeartbeatRequest) returns (HeartbeatResponse);
-  rpc ReplicateFile (ReplicateFileRequest) returns (ReplicateFileResponse);
+  rpc ReplicateFile (stream ReplicateFileRequest) returns (ReplicateFileResponse);
   rpc InitiateSnapshot (SnapshotRequest) returns (SnapshotResponse);
   rpc Marker (MarkerMessage) returns (MarkerResponse);
   rpc GetSnapshot (GetSnapshotRequest) returns (GetSnapshotResponse);
@@ -69,10 +69,16 @@ message HeartbeatResponse {
   bool success = 2;
 }
 
-message ReplicateFileRequest {
+message ReplicateFileMetadata {
   string filename = 1;
-  bytes contents = 2;
-  int64 version = 3;
+  int64 version = 2;
+}
+
+message ReplicateFileRequest {
+  oneof payload {
+    ReplicateFileMetadata metadata = 1;
+    bytes file_data = 2;
+  }
 }
 
 message ReplicateFileResponse {

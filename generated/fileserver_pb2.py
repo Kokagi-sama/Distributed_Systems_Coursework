@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x66ileserver.proto\x12\nfileserver\"/\n\x08MetaData\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x11\n\textension\x18\x02 \x01(\t\"J\n\rFetchResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x11\n\tfile_data\x18\x02 \x01(\x0c\x12\x15\n\rerror_message\x18\x03 \x01(\t\"Y\n\rUploadRequest\x12(\n\x08metadata\x18\x01 \x01(\x0b\x32\x14.fileserver.MetaDataH\x00\x12\x13\n\tfile_data\x18\x02 \x01(\x0cH\x00\x42\t\n\x07request\"8\n\x0eUploadResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rerror_message\x18\x02 \x01(\t\",\n\x17RetrieveFileListRequest\x12\x11\n\tdata_type\x18\x01 \x01(\t\"\xa8\x01\n\x18RetrieveFileListResponse\x12\x45\n\tfile_list\x18\x01 \x03(\x0b\x32\x32.fileserver.RetrieveFileListResponse.FileListEntry\x1a\x45\n\rFileListEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12#\n\x05value\x18\x02 \x01(\x0b\x32\x14.fileserver.MetaData:\x02\x38\x01\"`\n\x0bVoteRequest\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x14\n\x0c\x63\x61ndidate_id\x18\x02 \x01(\t\x12\x16\n\x0elast_log_index\x18\x03 \x01(\x03\x12\x15\n\rlast_log_term\x18\x04 \x01(\x03\"2\n\x0cVoteResponse\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x14\n\x0cvote_granted\x18\x02 \x01(\x08\"3\n\x10HeartbeatRequest\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x11\n\tleader_id\x18\x02 \x01(\t\"2\n\x11HeartbeatResponse\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x0f\n\x07success\x18\x02 \x01(\x08\"K\n\x14ReplicateFileRequest\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x10\n\x08\x63ontents\x18\x02 \x01(\x0c\x12\x0f\n\x07version\x18\x03 \x01(\x03\"&\n\x15ReplicateFileResponse\x12\r\n\x05\x65rror\x18\x01 \x01(\t\"<\n\x0fSnapshotRequest\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\x12\x14\n\x0cinitiator_id\x18\x02 \x01(\t\"2\n\x10SnapshotResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\r\n\x05\x65rror\x18\x02 \x01(\t\"K\n\rMarkerMessage\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\x12\x11\n\tsender_id\x18\x02 \x01(\t\x12\x12\n\nchannel_id\x18\x03 \x01(\t\"!\n\x0eMarkerResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\"@\n\tFileState\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x10\n\x08\x63ontents\x18\x02 \x01(\x0c\x12\x0f\n\x07version\x18\x03 \x01(\x03\"K\n\x0c\x43hannelState\x12\x12\n\nchannel_id\x18\x01 \x01(\t\x12\'\n\x08messages\x18\x02 \x03(\x0b\x32\x15.fileserver.FileState\")\n\x12GetSnapshotRequest\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\"\x9d\x01\n\x13GetSnapshotResponse\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\x12*\n\x0blocal_state\x18\x02 \x03(\x0b\x32\x15.fileserver.FileState\x12\x30\n\x0e\x63hannel_states\x18\x03 \x03(\x0b\x32\x18.fileserver.ChannelState\x12\x13\n\x0bis_complete\x18\x04 \x01(\x08\"%\n\x0eRestoreRequest\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\"1\n\x0fRestoreResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\r\n\x05\x65rror\x18\x02 \x01(\t2\x84\x06\n\nFileServer\x12>\n\tFetchFile\x12\x14.fileserver.MetaData\x1a\x19.fileserver.FetchResponse0\x01\x12\x45\n\nUploadFile\x12\x19.fileserver.UploadRequest\x1a\x1a.fileserver.UploadResponse(\x01\x12]\n\x10RetrieveFileList\x12#.fileserver.RetrieveFileListRequest\x1a$.fileserver.RetrieveFileListResponse\x12@\n\x0bRequestVote\x12\x17.fileserver.VoteRequest\x1a\x18.fileserver.VoteResponse\x12H\n\tHeartbeat\x12\x1c.fileserver.HeartbeatRequest\x1a\x1d.fileserver.HeartbeatResponse\x12T\n\rReplicateFile\x12 .fileserver.ReplicateFileRequest\x1a!.fileserver.ReplicateFileResponse\x12M\n\x10InitiateSnapshot\x12\x1b.fileserver.SnapshotRequest\x1a\x1c.fileserver.SnapshotResponse\x12?\n\x06Marker\x12\x19.fileserver.MarkerMessage\x1a\x1a.fileserver.MarkerResponse\x12N\n\x0bGetSnapshot\x12\x1e.fileserver.GetSnapshotRequest\x1a\x1f.fileserver.GetSnapshotResponse\x12N\n\x13RestoreFromSnapshot\x12\x1a.fileserver.RestoreRequest\x1a\x1b.fileserver.RestoreResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x66ileserver.proto\x12\nfileserver\"/\n\x08MetaData\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x11\n\textension\x18\x02 \x01(\t\"J\n\rFetchResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x11\n\tfile_data\x18\x02 \x01(\x0c\x12\x15\n\rerror_message\x18\x03 \x01(\t\"Y\n\rUploadRequest\x12(\n\x08metadata\x18\x01 \x01(\x0b\x32\x14.fileserver.MetaDataH\x00\x12\x13\n\tfile_data\x18\x02 \x01(\x0cH\x00\x42\t\n\x07request\"8\n\x0eUploadResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rerror_message\x18\x02 \x01(\t\",\n\x17RetrieveFileListRequest\x12\x11\n\tdata_type\x18\x01 \x01(\t\"\xa8\x01\n\x18RetrieveFileListResponse\x12\x45\n\tfile_list\x18\x01 \x03(\x0b\x32\x32.fileserver.RetrieveFileListResponse.FileListEntry\x1a\x45\n\rFileListEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12#\n\x05value\x18\x02 \x01(\x0b\x32\x14.fileserver.MetaData:\x02\x38\x01\"`\n\x0bVoteRequest\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x14\n\x0c\x63\x61ndidate_id\x18\x02 \x01(\t\x12\x16\n\x0elast_log_index\x18\x03 \x01(\x03\x12\x15\n\rlast_log_term\x18\x04 \x01(\x03\"2\n\x0cVoteResponse\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x14\n\x0cvote_granted\x18\x02 \x01(\x08\"3\n\x10HeartbeatRequest\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x11\n\tleader_id\x18\x02 \x01(\t\"2\n\x11HeartbeatResponse\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x0f\n\x07success\x18\x02 \x01(\x08\":\n\x15ReplicateFileMetadata\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x0f\n\x07version\x18\x02 \x01(\x03\"m\n\x14ReplicateFileRequest\x12\x35\n\x08metadata\x18\x01 \x01(\x0b\x32!.fileserver.ReplicateFileMetadataH\x00\x12\x13\n\tfile_data\x18\x02 \x01(\x0cH\x00\x42\t\n\x07payload\"&\n\x15ReplicateFileResponse\x12\r\n\x05\x65rror\x18\x01 \x01(\t\"<\n\x0fSnapshotRequest\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\x12\x14\n\x0cinitiator_id\x18\x02 \x01(\t\"2\n\x10SnapshotResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\r\n\x05\x65rror\x18\x02 \x01(\t\"K\n\rMarkerMessage\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\x12\x11\n\tsender_id\x18\x02 \x01(\t\x12\x12\n\nchannel_id\x18\x03 \x01(\t\"!\n\x0eMarkerResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\"@\n\tFileState\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x10\n\x08\x63ontents\x18\x02 \x01(\x0c\x12\x0f\n\x07version\x18\x03 \x01(\x03\"K\n\x0c\x43hannelState\x12\x12\n\nchannel_id\x18\x01 \x01(\t\x12\'\n\x08messages\x18\x02 \x03(\x0b\x32\x15.fileserver.FileState\")\n\x12GetSnapshotRequest\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\"\x9d\x01\n\x13GetSnapshotResponse\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\x12*\n\x0blocal_state\x18\x02 \x03(\x0b\x32\x15.fileserver.FileState\x12\x30\n\x0e\x63hannel_states\x18\x03 \x03(\x0b\x32\x18.fileserver.ChannelState\x12\x13\n\x0bis_complete\x18\x04 \x01(\x08\"%\n\x0eRestoreRequest\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\"1\n\x0fRestoreResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\r\n\x05\x65rror\x18\x02 \x01(\t2\x86\x06\n\nFileServer\x12>\n\tFetchFile\x12\x14.fileserver.MetaData\x1a\x19.fileserver.FetchResponse0\x01\x12\x45\n\nUploadFile\x12\x19.fileserver.UploadRequest\x1a\x1a.fileserver.UploadResponse(\x01\x12]\n\x10RetrieveFileList\x12#.fileserver.RetrieveFileListRequest\x1a$.fileserver.RetrieveFileListResponse\x12@\n\x0bRequestVote\x12\x17.fileserver.VoteRequest\x1a\x18.fileserver.VoteResponse\x12H\n\tHeartbeat\x12\x1c.fileserver.HeartbeatRequest\x1a\x1d.fileserver.HeartbeatResponse\x12V\n\rReplicateFile\x12 .fileserver.ReplicateFileRequest\x1a!.fileserver.ReplicateFileResponse(\x01\x12M\n\x10InitiateSnapshot\x12\x1b.fileserver.SnapshotRequest\x1a\x1c.fileserver.SnapshotResponse\x12?\n\x06Marker\x12\x19.fileserver.MarkerMessage\x1a\x1a.fileserver.MarkerResponse\x12N\n\x0bGetSnapshot\x12\x1e.fileserver.GetSnapshotRequest\x1a\x1f.fileserver.GetSnapshotResponse\x12N\n\x13RestoreFromSnapshot\x12\x1a.fileserver.RestoreRequest\x1a\x1b.fileserver.RestoreResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -55,30 +55,32 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_HEARTBEATREQUEST']._serialized_end=724
   _globals['_HEARTBEATRESPONSE']._serialized_start=726
   _globals['_HEARTBEATRESPONSE']._serialized_end=776
-  _globals['_REPLICATEFILEREQUEST']._serialized_start=778
-  _globals['_REPLICATEFILEREQUEST']._serialized_end=853
-  _globals['_REPLICATEFILERESPONSE']._serialized_start=855
-  _globals['_REPLICATEFILERESPONSE']._serialized_end=893
-  _globals['_SNAPSHOTREQUEST']._serialized_start=895
-  _globals['_SNAPSHOTREQUEST']._serialized_end=955
-  _globals['_SNAPSHOTRESPONSE']._serialized_start=957
-  _globals['_SNAPSHOTRESPONSE']._serialized_end=1007
-  _globals['_MARKERMESSAGE']._serialized_start=1009
-  _globals['_MARKERMESSAGE']._serialized_end=1084
-  _globals['_MARKERRESPONSE']._serialized_start=1086
-  _globals['_MARKERRESPONSE']._serialized_end=1119
-  _globals['_FILESTATE']._serialized_start=1121
-  _globals['_FILESTATE']._serialized_end=1185
-  _globals['_CHANNELSTATE']._serialized_start=1187
-  _globals['_CHANNELSTATE']._serialized_end=1262
-  _globals['_GETSNAPSHOTREQUEST']._serialized_start=1264
-  _globals['_GETSNAPSHOTREQUEST']._serialized_end=1305
-  _globals['_GETSNAPSHOTRESPONSE']._serialized_start=1308
-  _globals['_GETSNAPSHOTRESPONSE']._serialized_end=1465
-  _globals['_RESTOREREQUEST']._serialized_start=1467
-  _globals['_RESTOREREQUEST']._serialized_end=1504
-  _globals['_RESTORERESPONSE']._serialized_start=1506
-  _globals['_RESTORERESPONSE']._serialized_end=1555
-  _globals['_FILESERVER']._serialized_start=1558
-  _globals['_FILESERVER']._serialized_end=2330
+  _globals['_REPLICATEFILEMETADATA']._serialized_start=778
+  _globals['_REPLICATEFILEMETADATA']._serialized_end=836
+  _globals['_REPLICATEFILEREQUEST']._serialized_start=838
+  _globals['_REPLICATEFILEREQUEST']._serialized_end=947
+  _globals['_REPLICATEFILERESPONSE']._serialized_start=949
+  _globals['_REPLICATEFILERESPONSE']._serialized_end=987
+  _globals['_SNAPSHOTREQUEST']._serialized_start=989
+  _globals['_SNAPSHOTREQUEST']._serialized_end=1049
+  _globals['_SNAPSHOTRESPONSE']._serialized_start=1051
+  _globals['_SNAPSHOTRESPONSE']._serialized_end=1101
+  _globals['_MARKERMESSAGE']._serialized_start=1103
+  _globals['_MARKERMESSAGE']._serialized_end=1178
+  _globals['_MARKERRESPONSE']._serialized_start=1180
+  _globals['_MARKERRESPONSE']._serialized_end=1213
+  _globals['_FILESTATE']._serialized_start=1215
+  _globals['_FILESTATE']._serialized_end=1279
+  _globals['_CHANNELSTATE']._serialized_start=1281
+  _globals['_CHANNELSTATE']._serialized_end=1356
+  _globals['_GETSNAPSHOTREQUEST']._serialized_start=1358
+  _globals['_GETSNAPSHOTREQUEST']._serialized_end=1399
+  _globals['_GETSNAPSHOTRESPONSE']._serialized_start=1402
+  _globals['_GETSNAPSHOTRESPONSE']._serialized_end=1559
+  _globals['_RESTOREREQUEST']._serialized_start=1561
+  _globals['_RESTOREREQUEST']._serialized_end=1598
+  _globals['_RESTORERESPONSE']._serialized_start=1600
+  _globals['_RESTORERESPONSE']._serialized_end=1649
+  _globals['_FILESERVER']._serialized_start=1652
+  _globals['_FILESERVER']._serialized_end=2426
 # @@protoc_insertion_point(module_scope)

@@ -3,9 +3,9 @@
 import grpc
 import warnings
 
-import fileserver_pb2 as fileserver__pb2
+from . import fileserver_pb2 as fileserver__pb2
 
-GRPC_GENERATED_VERSION = '1.76.0'
+GRPC_GENERATED_VERSION = '1.75.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in fileserver_pb2_grpc.py depends on'
+        + f' but the generated code in fileserver_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -59,7 +59,7 @@ class FileServerStub(object):
                 request_serializer=fileserver__pb2.HeartbeatRequest.SerializeToString,
                 response_deserializer=fileserver__pb2.HeartbeatResponse.FromString,
                 _registered_method=True)
-        self.ReplicateFile = channel.unary_unary(
+        self.ReplicateFile = channel.stream_unary(
                 '/fileserver.FileServer/ReplicateFile',
                 request_serializer=fileserver__pb2.ReplicateFileRequest.SerializeToString,
                 response_deserializer=fileserver__pb2.ReplicateFileResponse.FromString,
@@ -119,7 +119,7 @@ class FileServerServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ReplicateFile(self, request, context):
+    def ReplicateFile(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -177,7 +177,7 @@ def add_FileServerServicer_to_server(servicer, server):
                     request_deserializer=fileserver__pb2.HeartbeatRequest.FromString,
                     response_serializer=fileserver__pb2.HeartbeatResponse.SerializeToString,
             ),
-            'ReplicateFile': grpc.unary_unary_rpc_method_handler(
+            'ReplicateFile': grpc.stream_unary_rpc_method_handler(
                     servicer.ReplicateFile,
                     request_deserializer=fileserver__pb2.ReplicateFileRequest.FromString,
                     response_serializer=fileserver__pb2.ReplicateFileResponse.SerializeToString,
@@ -349,7 +349,7 @@ class FileServer(object):
             _registered_method=True)
 
     @staticmethod
-    def ReplicateFile(request,
+    def ReplicateFile(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -359,8 +359,8 @@ class FileServer(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
+        return grpc.experimental.stream_unary(
+            request_iterator,
             target,
             '/fileserver.FileServer/ReplicateFile',
             fileserver__pb2.ReplicateFileRequest.SerializeToString,

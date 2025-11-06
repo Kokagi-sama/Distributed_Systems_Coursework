@@ -410,24 +410,45 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     # REPLICATION
     # ========================================================================
     
+    def _generate_replication_requests(
+        self, filename: str, file_data: bytes, version: int
+    ) -> Iterator[fileserver_pb2.ReplicateFileRequest]:
+        """Generator for streaming file replication."""
+        
+        # 1. Send metadata
+        metadata = fileserver_pb2.ReplicateFileMetadata(
+            filename=filename, version=version
+        )
+        yield fileserver_pb2.ReplicateFileRequest(metadata=metadata)
+
+        # 2. Send file in 1MB chunks
+        chunk_size = 1024 * 1024  # 1MB
+        for i in range(0, len(file_data), chunk_size):
+            chunk = file_data[i : i + chunk_size]
+            yield fileserver_pb2.ReplicateFileRequest(file_data=chunk)
+    
     def _replicate_to_followers(self, filename: str) -> None:
         """Replicate file to all followers"""
         with self.lock:
             if filename not in self.files:
                 return
             f = self.files[filename]
-            # This request needs the version, which is why we keep it internally
-            req = fileserver_pb2.ReplicateFileRequest(
-                filename=filename,
-                contents=f["data"],
-                version=f["version"],
-            )
+            file_data = f["data"] 
+            version = f["version"]
         
         for peer in self.peers:
             try:
+                
                 with grpc.insecure_channel(peer) as channel:
                     stub = fileserver_pb2_grpc.FileServerStub(channel)
-                    stub.ReplicateFile(req, timeout=2.0)
+                    
+                    
+                    request_iterator = self._generate_replication_requests(
+                        filename, file_data, version
+                    )
+
+                    stub.ReplicateFile(request_iterator, timeout=30.0) 
+            
             except Exception as e:
                 print(
                     f"[{self.server_id}] Replication to {peer} failed: {e}"
@@ -435,19 +456,47 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     
     def ReplicateFile(
         self,
-        request: fileserver_pb2.ReplicateFileRequest,
+        request_iterator: Iterator[fileserver_pb2.ReplicateFileRequest],
         context: grpc.ServicerContext,
     ) -> fileserver_pb2.ReplicateFileResponse:
-        """Receive replicated file from leader"""
+        """Receive replicated file from leader (client-streaming)"""
+        
+        metadata: Optional[fileserver_pb2.ReplicateFileMetadata] = None
+        file_chunks = []
+        filename = ""
+        version = 0
+
+        try:
+            for request in request_iterator:
+                if request.HasField("metadata"):
+                    if metadata is not None:
+                        raise ValueError("Replication client sent metadata twice")
+                    metadata = request.metadata
+                    filename = metadata.filename
+                    version = metadata.version
+                elif request.HasField("file_data"):
+                    if metadata is None:
+                        raise ValueError("Replication client sent file data before metadata")
+                    file_chunks.append(request.file_data)
+            
+            if not metadata:
+                raise ValueError("Replication client sent no metadata")
+
+        except Exception as e:
+            print(f"[{self.server_id}] Error in replication stream: {e}")
+            return fileserver_pb2.ReplicateFileResponse(error=str(e))
+
+        file_data = b"".join(file_chunks)
+
         with self.lock:
-            cur = self.files.get(request.filename)
-            if cur is None or request.version > cur["version"]:
-                self.files[request.filename] = {
-                    "data": request.contents,
-                    "version": request.version,
+            cur = self.files.get(filename)
+            if cur is None or version > cur["version"]:
+                self.files[filename] = {
+                    "data": file_data,
+                    "version": version,
                 }
                 print(
-                    f"[{self.server_id}] Replicated {request.filename} v{request.version}"
+                    f"[{self.server_id}] Replicated {filename} v{version} ({len(file_data)} bytes)"
                 )
         
         return fileserver_pb2.ReplicateFileResponse(error="")
