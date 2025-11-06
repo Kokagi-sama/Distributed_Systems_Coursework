@@ -5,7 +5,8 @@ package fileserver;
 service FileServer {
     rpc FetchFile(FetchRequest) returns (stream FileChunk);
     rpc UploadFile(stream FileChunk) returns (UploadResponse);
-    rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+
+    rpc ListFiles(ListFilesRequest) returns (ListFilesResponse); // TODO: No longer needed
 }
 
 message FetchRequest {
@@ -23,15 +24,17 @@ message FileChunk {
 message FileMetadata {
     string filename = 1;
     int64 file_size = 2;
+    string checksum = 3;
 }
 
 message UploadResponse {
     bool success = 1;
     string error_message = 2;
+    string new_primary_fileserver = 3; // TODO: added to allow new primary file server to inform client who is the new primary server
 }
 
 message ListFilesRequest {}
 
 message ListFilesResponse {
-    repeated string filenames = 1;
+    map<string, string> file_list = 1; // Key: filename -> string, Value: checksum -> string
 }

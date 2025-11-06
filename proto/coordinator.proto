@@ -2,9 +2,17 @@ syntax = "proto3";
 
 package coordinator;
 
+enum ClientTaskStatus {
+    TASKED = 0;
+    IN_PROGRESS = 1;
+    COMPLETED = 2;
+    WAIT = 3;
+}
+
 service Coordinator {
-    rpc RequestTask(TaskRequest) returns (TaskResponse);
-    rpc CompleteTask(TaskCompletionRequest) returns (TaskCompletionResponse);
+    rpc RequestTask(TaskStatusRequest) returns (TaskStatusResponse);
+    rpc UpdateTaskStatus(TaskStatusRequest) returns (TaskStatusResponse);
+
     rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
 
@@ -13,22 +21,33 @@ enum TaskType {
     MERGE = 1;
 }
 
-message TaskRequest {
+message TaskStatusRequest {
     string client_id = 1;
+    ClientTaskStatus client_task_status = 2;
 }
 
-message TaskResponse {
+message TaskStatusResponse {
+    string task_id = 5;
     bool has_task = 1;
+    ClientTaskStatus client_task_status = 8;
+
     TaskType task_type = 2;
-    string primary_fileserver_addr = 3;
+    string primary_fileserver_addr = 3; // TODO: remove
 
     // For FIND_PRIMES task:
     string filename = 4;
 
     // For MERGE task:
-    string task_id = 5;
     string file1 = 6;
     string file2 = 7;
+
+    // FOR OUTPUT FILE:
+    string output_file = 9;
+    string checksum = 10;
+
+    // FOR SPLIT TASK:
+    int64 start_index = 12;
+    int64 end_index = 13;
 }
 
 message TaskCompletionRequest {
@@ -47,3 +66,9 @@ message HeartbeatRequest {
 message HeartbeatResponse {
     bool acknowledged = 1;
 }
+
+message PrimaryFileServerAddr {
+    string primary_fileserver_addr = 1;
+}
+
+message PrimaryFileServer {}

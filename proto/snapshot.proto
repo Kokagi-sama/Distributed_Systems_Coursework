@@ -1,0 +1,3 @@
+syntax = "proto3";
+
+//TODO: To transfer the rpc calls from fileserver.proto here instead.
