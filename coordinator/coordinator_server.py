@@ -202,7 +202,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
     def start_heartbeat(self):
         pass
 
-    def check_dead_clients(self):
+    def check_dead_clients_reassign_tasks(self):
         for client_id, (last_heartbeat, assigned_task_id) in self.clients.items():
             if time.time() - last_heartbeat > self.client_response_timeout:
                 print(
@@ -232,6 +232,12 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
                     if file in self.state['in_progress_de_duplication']:
                         self.state['pending_de_duplication'].append(
                             self.state['in_progress_de_duplication'].pop(file))  # Remove from in-progress and add back to pending
+
+    def update_heartbeat(self, client_id: str):
+        with self.lock:
+            if client_id in self.clients:
+                # Update last heartbeat time
+                self.clients[client_id][0] = time.time()
 
     # RPC Methods
 
@@ -279,7 +285,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
 
     def SendHeartbeat(self, request, context):
         client_id = request.client_id
-        self.clients[client_id][0] = time.time()  # Update last heartbeat time
+        self.update_heartbeat(client_id)
         return coordinator_pb2.HeartbeatResponse(acknowledged=True)
 
 
