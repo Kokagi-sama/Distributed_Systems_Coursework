@@ -7,6 +7,7 @@ Implements:
 - Leader election with automatic failover
 - Chandy-Lamport snapshots for crash recovery
 - File replication across nodes
+- Physical file storage on disk
 """
 
 import argparse
@@ -54,8 +55,13 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         self.lock: threading.Lock = threading.Lock()
         
         # Storage directory for persistence
-        self.storage_dir: Path = Path(storage_dir)
+        # MODIFIED: Append server_id to path to prevent local conflicts
+        self.storage_dir: Path = Path(storage_dir) / server_id
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+
+        # MODIFIED: Dedicated subdirectory for snapshots
+        self.snapshot_dir: Path = self.storage_dir / "snapshots"
+        self.snapshot_dir.mkdir(parents=True, exist_ok=True)
         
         # Server identity
         self.server_id: str = server_id
@@ -90,6 +96,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         
         print(f"[{server_id}] FileServer initialized")
         print(f"[{server_id}] Storage: {self.storage_dir}")
+        print(f"[{server_id}] Snapshots: {self.snapshot_dir}")
         print(f"[{server_id}] Peers: {peers}")
     
     def _random_election_timeout(self) -> float:
@@ -97,6 +104,16 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     
     def _is_leader(self) -> bool:
         return self.state == STATE_LEADER
+
+    def _write_to_disk(self, filename: str, data: bytes) -> None:
+        """Helper to write file data to the actual disk"""
+        file_path = self.storage_dir / filename
+        try:
+            with open(file_path, 'wb') as f:
+                f.write(data)
+            print(f"[{self.server_id}] Wrote to disk: {file_path}")
+        except Exception as e:
+            print(f"[{self.server_id}] Disk write failed for {filename}: {e}")
     
     # ========================================================================
     # CLIENT-FACING FILE OPERATIONS
@@ -189,6 +206,9 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                     success=False, error_message=error_msg
                 )
             
+            # Write to physical disk
+            self._write_to_disk(filename, file_data)
+
             # Internal versioning logic is maintained for replication,
             # even though the client-facing API no longer uses it.
             if filename in self.files:
@@ -491,6 +511,9 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         with self.lock:
             cur = self.files.get(filename)
             if cur is None or version > cur["version"]:
+                # Write to physical disk
+                self._write_to_disk(filename, file_data)
+                
                 self.files[filename] = {
                     "data": file_data,
                     "version": version,
@@ -642,7 +665,8 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 "channel_states": snapshot_state.channel_states,
             }
             
-            filename = f"snapshot_{snapshot_id}_{self.server_id}.pkl"
+            # MODIFIED: save snapshot file inside the server's DEDICATED SNAPSHOTS DIR
+            filename = self.snapshot_dir / f"snapshot_{snapshot_id}_{self.server_id}.pkl"
             with open(filename, "wb") as f:
                 pickle.dump(snapshot_data, f)
             
@@ -700,7 +724,8 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         snapshot_id = request.snapshot_id
         
         try:
-            filename = f"snapshot_{snapshot_id}_{self.server_id}.pkl"
+            # MODIFIED: look for snapshot in the server's DEDICATED SNAPSHOTS DIR
+            filename = self.snapshot_dir / f"snapshot_{snapshot_id}_{self.server_id}.pkl"
             with open(filename, "rb") as f:
                 snapshot_data = pickle.load(f)
             
@@ -709,6 +734,9 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             with self.lock:
                 self.files = {}
                 for fname, fdata in snapshot_data["local_state"].items():
+                    # Write to physical disk
+                    self._write_to_disk(fname, fdata["data"])
+                    
                     self.files[fname] = {
                         "data": fdata["data"],
                         "version": fdata["version"],
@@ -721,7 +749,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             return fileserver_pb2.RestoreResponse(success=True, error="")
         
         except FileNotFoundError:
-            error_msg = f"Snapshot {snapshot_id} not found"
+            error_msg = f"Snapshot {snapshot_id} not found at {filename}"
             print(f"[{self.server_id}] {error_msg}")
             return fileserver_pb2.RestoreResponse(
                 success=False, error=error_msg
@@ -755,7 +783,6 @@ def run_server(
 
 
 if __name__ == "__main__":
-    # This __main__ block is from your existing FileServer.py
     parser = argparse.ArgumentParser(description="FileServer with Leader Election")
     parser.add_argument("--id", type=str, required=True, help="Server ID")
     parser.add_argument("--port", type=int, required=True, help="Port")
