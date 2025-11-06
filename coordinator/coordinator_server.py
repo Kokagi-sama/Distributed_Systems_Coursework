@@ -16,13 +16,15 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         address: str,
         port: int,
         file_list: str,
-        heartbeat_interval: int = 5,
+        client_response_timeout: int = 15,
     ):
         self.address = address  # Server address
         self.port = port  # Server port
-        self.heartbeat_interval = heartbeat_interval  # Heartbeat interval in seconds
+        # self.heartbeat_interval = heartbeat_interval  # Heartbeat interval in seconds
         self.file_list = file_list  # Path to the file containing list of files to process
         self.lock = threading.Lock()  # Add a lock for thread safety
+        # Time in seconds to wait before considering a client dead
+        self.client_response_timeout = client_response_timeout
         # State dictionaries to track file processing status
         self.state = {
             "pending_prime": [],
@@ -34,7 +36,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         }
         self.result_filename = ""  # To store the final result filename
 
-        # To track connected clients/workers {client_id: [client_alive_status, last_heartbeat_time, assigned_task_id]}
+        # To track connected clients/workers {client_id: [last_heartbeat_time, assigned_task_id]}
         self.clients = {}
 
         self.tasks = {}  # To track tasks {task_id: Task object}
@@ -57,7 +59,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         with self.lock:
             if client_id not in self.clients:
                 # [alive_status, last_heartbeat_time, assigned_task_id]
-                self.clients[client_id] = [True, time.time(), None]
+                self.clients[client_id] = [time.time(), 0]
                 print(f"Registered new client: {client_id}")
             else:
                 print(f"Client {client_id} is already registered.")
@@ -145,7 +147,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
             if task:
                 print(f"Assigning task {task.task_id} to client {client_id}")
                 # Update assigned task ID in the clients dictionary
-                self.clients[client_id][2] = task.task_id
+                self.clients[client_id][1] = task.task_id
                 # Update state to reflect in-progress task
                 if task.task_type == 0:
                     self.state['in_progress_prime'].append(task.task_files[0])
@@ -200,6 +202,37 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
     def start_heartbeat(self):
         pass
 
+    def check_dead_clients(self):
+        for client_id, (last_heartbeat, assigned_task_id) in self.clients.items():
+            if time.time() - last_heartbeat > self.client_response_timeout:
+                print(
+                    f"Client {client_id} is considered dead. Last heartbeat at {last_heartbeat}, current time {time.time()}")
+                # Reassign the task if there was an assigned task
+                if assigned_task_id:
+                    self.reassign_task(assigned_task_id)
+
+    def reassign_task(self, task_id):
+        with self.lock:
+            task = self.tasks.get(task_id)
+            if not task:
+                print(f"Task {task_id} not found for reassignment.")
+                return
+            print(f"Reassigning task {task_id} back to pending state.")
+            # Update state based on task type
+            if task.task_type == 0:
+                # For prime task
+                if task.task_files[0] in self.state['in_progress_prime']:
+
+                    self.state['pending_prime'].append(
+                        self.state['in_progress_prime'].pop(
+                            task.task_files[0]))  # Remove from in-progress and add back to pending
+            else:
+                # For de-duplication task
+                for file in task.task_files:
+                    if file in self.state['in_progress_de_duplication']:
+                        self.state['pending_de_duplication'].append(
+                            self.state['in_progress_de_duplication'].pop(file))  # Remove from in-progress and add back to pending
+
     # RPC Methods
 
     def RequestTask(self, request, context):
@@ -245,7 +278,8 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
     # Not doing anything for heartbeat for now just responding acknowledged
 
     def SendHeartbeat(self, request, context):
-        # self.register_client(client_id) # Not doing it here for now
+        client_id = request.client_id
+        self.clients[client_id][0] = time.time()  # Update last heartbeat time
         return coordinator_pb2.HeartbeatResponse(acknowledged=True)
 
 
@@ -261,6 +295,9 @@ class Task:
         self.task_status = task_status  # 0: in-progress, 1: completed
         Task.task_id_static += 1
 
+    def set_global_taskID(self, task_id: int):
+        Task.task_id_static = self.task_id
+
 
 def main():
 
@@ -272,6 +309,10 @@ def main():
         f"Created task {task.task_id} for client {task.client_id} of type {task.task_type}")
 
     print(Task.task_id_s)
+
+    # start sever
+
+    # check dead client
 
 
 if __name__ == "__main__":
