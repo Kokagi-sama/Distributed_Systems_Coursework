@@ -16,6 +16,12 @@ def temp_test_file(tmp_path):
     return test_file
 
 
+@pytest.fixture
+def file_servers():
+    """List of file server addresses for testing."""
+    return ["localhost:50052", "localhost:50053", "localhost:50054"]
+
+
 def create_upload_capturer():
     """Create a function that captures uploaded chunks."""
     uploaded_data = []
@@ -28,16 +34,32 @@ def create_upload_capturer():
     return capture_upload, uploaded_data
 
 
-def test_client_initialization():
+def create_fetch_chunks(filename, file_content, checksum=None):
+    """Create fetch chunks with optional checksum."""
+    metadata = fileserver_pb2.FileMetadata(
+        filename=filename, file_size=len(file_content)
+    )
+    if checksum:
+        metadata.checksum = checksum
+
+    return iter(
+        [
+            fileserver_pb2.FileChunk(metadata=metadata),
+            fileserver_pb2.FileChunk(chunk_data=file_content),
+        ]
+    )
+
+
+def test_client_initialization(file_servers):
     """Test client initializes correctly."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
     assert client.client_id == "test-client"
     assert client.cache_dir.exists()
 
 
-def test_process_file(temp_test_file):
+def test_process_file(temp_test_file, file_servers):
     """Test processing full file."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     file_content = temp_test_file.read_bytes()
     capture_upload, uploaded_data = create_upload_capturer()
@@ -74,9 +96,9 @@ def test_process_file(temp_test_file):
     assert mock_stub.UploadFile.call_count == 1
 
 
-def test_request_task_with_mock():
+def test_request_task_with_mock(file_servers):
     """Test RequestTask RPC with mock coordinator."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     mock_response = coordinator_pb2.TaskResponse(
         status=coordinator_pb2.TASK_AVAILABLE,
@@ -95,9 +117,9 @@ def test_request_task_with_mock():
     assert task.primary_fileserver_addr == "localhost:50052"
 
 
-def test_complete_task_with_mock():
+def test_complete_task_with_mock(file_servers):
     """Test CompleteTask RPC with mock coordinator."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     mock_response = coordinator_pb2.TaskCompletionResponse(acknowledged=True)
     client.coordinator.CompleteTask = Mock(return_value=mock_response)
@@ -110,9 +132,9 @@ def test_complete_task_with_mock():
     assert response.acknowledged is True
 
 
-def test_no_task_available():
+def test_no_task_available(file_servers):
     """Test handling when coordinator has no tasks."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     mock_response = coordinator_pb2.TaskResponse(
         status=coordinator_pb2.NO_TASK_AVAILABLE
@@ -125,9 +147,9 @@ def test_no_task_available():
     assert task.status == coordinator_pb2.NO_TASK_AVAILABLE
 
 
-def test_wait_for_dependencies():
+def test_wait_for_dependencies(file_servers):
     """Test handling when coordinator returns WAIT_FOR_DEPENDENCIES."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     mock_response = coordinator_pb2.TaskResponse(
         status=coordinator_pb2.WAIT_FOR_DEPENDENCIES
@@ -140,9 +162,9 @@ def test_wait_for_dependencies():
     assert task.status == coordinator_pb2.WAIT_FOR_DEPENDENCIES
 
 
-def test_exponential_backoff_on_wait():
+def test_exponential_backoff_on_wait(file_servers):
     """Test exponential backoff when waiting for dependencies."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     wait_response = coordinator_pb2.TaskResponse(
         status=coordinator_pb2.WAIT_FOR_DEPENDENCIES
@@ -197,9 +219,9 @@ def test_exponential_backoff_on_wait():
     assert client.process_file.call_count == 1
 
 
-def test_heartbeat_with_mock():
+def test_heartbeat_with_mock(file_servers):
     """Test SendHeartbeat RPC with mock coordinator."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     mock_response = coordinator_pb2.HeartbeatResponse(acknowledged=True)
     client.coordinator.SendHeartbeat = Mock(return_value=mock_response)
@@ -210,9 +232,9 @@ def test_heartbeat_with_mock():
     assert response.acknowledged is True
 
 
-def test_fetch_file_with_mock():
+def test_fetch_file_with_mock(file_servers):
     """Test file fetching with mock file server."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     file_content = b"17\n19\n23\n29\n31\n"
     fetch_chunks = [
@@ -230,16 +252,16 @@ def test_fetch_file_with_mock():
         with patch(
             "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
         ):
-            filepath = client._fetch_file("test.txt", "localhost:50052")
+            filepath = client._fetch_file("test.txt")
 
     assert filepath.exists()
     assert filepath.read_bytes() == file_content
     assert "test.txt" in client.cached_files
 
 
-def test_fetch_file_from_cache():
+def test_fetch_file_from_cache(file_servers):
     """Test file is served from cache on second request."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     file_content = b"2\n3\n5\n7\n"
     fetch_chunks = [
@@ -257,16 +279,16 @@ def test_fetch_file_from_cache():
         with patch(
             "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
         ):
-            filepath1 = client._fetch_file("test.txt", "localhost:50052")
-            filepath2 = client._fetch_file("test.txt", "localhost:50052")
+            filepath1 = client._fetch_file("test.txt")
+            filepath2 = client._fetch_file("test.txt")
 
     assert filepath1 == filepath2
     assert mock_stub.FetchFile.call_count == 1
 
 
-def test_process_file_partial_range(temp_test_file):
+def test_process_file_partial_range(temp_test_file, file_servers):
     """Test processing partial line range."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     file_content = temp_test_file.read_bytes()
     capture_upload, uploaded_data = create_upload_capturer()
@@ -303,9 +325,9 @@ def test_process_file_partial_range(temp_test_file):
     assert mock_stub.UploadFile.call_count == 1
 
 
-def test_merge_files():
+def test_merge_files(file_servers):
     """Test merging two prime files."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     capture_upload, uploaded_data = create_upload_capturer()
 
@@ -352,9 +374,9 @@ def test_merge_files():
     assert mock_stub.UploadFile.call_count == 1
 
 
-def test_upload_includes_checksum(temp_test_file):
+def test_upload_includes_checksum(temp_test_file, file_servers):
     """Test that upload includes checksum and atomic_upload flag."""
-    client = Client("test-client", "localhost:50051")
+    client = Client("test-client", "localhost:50051", file_servers)
 
     file_content = temp_test_file.read_bytes()
     capture_upload, uploaded_data = create_upload_capturer()
@@ -394,9 +416,9 @@ def test_upload_includes_checksum(temp_test_file):
     assert len(metadata.checksum) == 64  # SHA-256 produces 64 hex chars
 
 
-def test_download_verifies_checksum(temp_test_file):
-    """Test that download verifies checksum from file server."""
-    client = Client("test-client", "localhost:50051")
+def test_fetch_verifies_checksum(temp_test_file, file_servers):
+    """Test that fetch verifies checksum from file server."""
+    client = Client("test-client", "localhost:50051", file_servers)
 
     file_content = temp_test_file.read_bytes()
 
@@ -405,64 +427,73 @@ def test_download_verifies_checksum(temp_test_file):
     sha256.update(file_content)
     correct_checksum = sha256.hexdigest()
 
-    # Create fetch chunks with checksum in metadata
-    fetch_chunks = [
-        fileserver_pb2.FileChunk(
-            metadata=fileserver_pb2.FileMetadata(
-                filename="test_numbers.txt",
-                file_size=len(file_content),
-                checksum=correct_checksum,
-            )
-        ),
-        fileserver_pb2.FileChunk(chunk_data=file_content),
-    ]
-
     mock_stub = MagicMock()
-    mock_stub.FetchFile.return_value = iter(fetch_chunks)
+    mock_stub.FetchFile.return_value = create_fetch_chunks(
+        "test_numbers.txt", file_content, correct_checksum
+    )
 
     with patch("grpc.insecure_channel"):
         with patch(
             "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
         ):
             # Should succeed with correct checksum
-            cached_path = client._fetch_file("test_numbers.txt", "localhost:50052")
+            cached_path = client._fetch_file("test_numbers.txt")
 
     assert cached_path.exists()
     assert cached_path.read_bytes() == file_content
 
 
-def test_download_detects_checksum_mismatch(temp_test_file):
-    """Test that download detects checksum mismatch and raises error."""
-    client = Client("test-client", "localhost:50051")
+def test_fetch_failover_on_server_error(temp_test_file, file_servers):
+    """Test that fetch fails over to next server when first server fails."""
+    client = Client("test-client", "localhost:50051", file_servers)
+
+    file_content = temp_test_file.read_bytes()
+
+    # Compute correct checksum
+    sha256 = hashlib.sha256()
+    sha256.update(file_content)
+    correct_checksum = sha256.hexdigest()
+
+    # First call fails, second call succeeds
+    mock_stub = MagicMock()
+    mock_stub.FetchFile.side_effect = [
+        Exception("Connection refused"),
+        create_fetch_chunks("test_numbers.txt", file_content, correct_checksum),
+    ]
+
+    with patch("grpc.insecure_channel"):
+        with patch(
+            "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
+        ):
+            cached_path = client._fetch_file("test_numbers.txt")
+
+    assert cached_path.exists()
+    assert cached_path.read_bytes() == file_content
+    assert mock_stub.FetchFile.call_count == 2
+
+
+def test_fetch_detects_checksum_mismatch(temp_test_file, file_servers):
+    """Test that fetch detects checksum mismatch and raises error."""
+    client = Client("test-client", "localhost:50051", file_servers)
 
     file_content = temp_test_file.read_bytes()
 
     # Use wrong checksum
     wrong_checksum = "a" * 64
 
-    # Create fetch chunks with wrong checksum
-    fetch_chunks = [
-        fileserver_pb2.FileChunk(
-            metadata=fileserver_pb2.FileMetadata(
-                filename="test_numbers.txt",
-                file_size=len(file_content),
-                checksum=wrong_checksum,
-            )
-        ),
-        fileserver_pb2.FileChunk(chunk_data=file_content),
-    ]
-
     mock_stub = MagicMock()
-    mock_stub.FetchFile.return_value = iter(fetch_chunks)
+    mock_stub.FetchFile.side_effect = lambda _: create_fetch_chunks(
+        "test_numbers.txt", file_content, wrong_checksum
+    )
 
     with patch("grpc.insecure_channel"):
         with patch(
             "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
         ):
-            # Should raise RuntimeError on checksum mismatch
+            # Should raise RuntimeError after all servers fail checksum
             try:
-                client._fetch_file("test_numbers.txt", "localhost:50052")
+                client._fetch_file("test_numbers.txt")
                 assert False, "Expected RuntimeError for checksum mismatch"
             except RuntimeError as e:
-                assert "Checksum verification failed" in str(e)
-                assert wrong_checksum in str(e)
+                assert "Failed to fetch" in str(e)
+                assert "from all file servers" in str(e)

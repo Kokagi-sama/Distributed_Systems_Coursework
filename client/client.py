@@ -1,6 +1,7 @@
+import argparse
 import grpc
 import hashlib
-import sys
+import random
 import threading
 import time
 from pathlib import Path
@@ -17,12 +18,14 @@ class Client:
         self,
         client_id: str,
         coordinator_address: str,
+        fileserver_addresses: list[str],
         cache_dir: str = "/tmp/client_cache",
         heartbeat_interval: int = 5,
     ):
         self.client_id = client_id
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.fileserver_addresses = fileserver_addresses
 
         # Connect to coordinator via gRPC
         coordinator_channel = grpc.insecure_channel(coordinator_address)
@@ -38,6 +41,7 @@ class Client:
 
         print(f"[{client_id}] Client initialized")
         print(f"[{client_id}] Cache directory: {self.cache_dir}")
+        print(f"[{client_id}] File servers: {', '.join(fileserver_addresses)}")
 
     def _compute_checksum(self, filepath: Path, chunk_size: int = 65536) -> str:
         """Compute SHA-256 checksum of file."""
@@ -90,48 +94,65 @@ class Client:
 
         return server_checksum
 
-    def _fetch_file(self, filename: str, fileserver_address: str) -> Path:
-        """Fetch file from file server and cache it locally."""
+    def _fetch_file(self, filename: str) -> Path:
+        """Fetch file from file server with random selection and failover."""
         # Return cached version if available
         if filename in self.cached_files:
             print(f"[{self.client_id}] Using cached {filename}")
             return self.cached_files[filename]
 
-        # Connect to file server
-        print(f"[{self.client_id}] Fetching {filename} from {fileserver_address}")
-        fileserver_channel = grpc.insecure_channel(fileserver_address)
-        fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
+        # Try file servers in random order for load balancing
+        servers = self.fileserver_addresses.copy()
+        random.shuffle(servers)
 
-        # Request file via RPC
-        request = fileserver_pb2.FetchRequest(filename=filename)
-        chunk_stream = fileserver_stub.FetchFile(request)
-
-        # Save to local cache
-        cached_path = self.cache_dir / Path(filename).name
-
-        try:
-            server_checksum = self._stream_fetch(chunk_stream, cached_path)
-        except grpc.RpcError as e:
-            raise FileNotFoundError(f"File {filename} not found: {e}")
-
-        # Verify checksum if provided by server
-        if server_checksum:
-            computed_checksum = self._compute_checksum(cached_path)
-            if computed_checksum != server_checksum:
-                # Delete corrupted file
-                cached_path.unlink()
-                raise RuntimeError(
-                    f"Checksum verification failed for {filename}: expected {server_checksum}, got {computed_checksum}"
+        last_error = None
+        for fileserver_address in servers:
+            try:
+                print(
+                    f"[{self.client_id}] Fetching {filename} from {fileserver_address}"
                 )
-            print(f"[{self.client_id}] Successfully verified checksum for {filename}")
+                fileserver_channel = grpc.insecure_channel(fileserver_address)
+                fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
 
-        print(
-            f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}"
+                # Request file via RPC
+                request = fileserver_pb2.FetchRequest(filename=filename)
+                chunk_stream = fileserver_stub.FetchFile(request)
+
+                # Save to local cache
+                cached_path = self.cache_dir / Path(filename).name
+                server_checksum = self._stream_fetch(chunk_stream, cached_path)
+
+                # Verify checksum if provided by server
+                if server_checksum:
+                    computed_checksum = self._compute_checksum(cached_path)
+                    if computed_checksum != server_checksum:
+                        # Delete corrupted file
+                        cached_path.unlink()
+                        raise RuntimeError(
+                            f"Checksum verification failed for {filename}: expected {server_checksum}, got {computed_checksum}"
+                        )
+                    print(
+                        f"[{self.client_id}] Successfully verified checksum for {filename}"
+                    )
+
+                print(
+                    f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}"
+                )
+
+                self.cached_files[filename] = cached_path
+                print(f"[{self.client_id}] Cached {filename} locally")
+                return cached_path
+
+            except Exception as e:
+                print(
+                    f"[{self.client_id}] Failed to fetch from {fileserver_address}: {e}"
+                )
+                last_error = e
+                continue
+
+        raise RuntimeError(
+            f"Failed to fetch {filename} from all file servers: {last_error}"
         )
-
-        self.cached_files[filename] = cached_path
-        print(f"[{self.client_id}] Cached {filename} locally")
-        return cached_path
 
     def _upload_file(
         self, local_filepath: Path, remote_filename: str, fileserver_address: str
@@ -164,15 +185,15 @@ class Client:
     def process_file(
         self,
         filename: str,
-        fileserver_address: str,
+        primary_fileserver_addr: str,
         start_index: int,
         end_index: int,
     ) -> bool:
         """Process specific line range of file to find primes, deduplicate, and upload result."""
         try:
             # Get input file
-            filepath = self._fetch_file(filename, fileserver_address)
-        except FileNotFoundError as e:
+            filepath = self._fetch_file(filename)
+        except Exception as e:
             print(f"[{self.client_id}] Error: {e}")
             return False
 
@@ -223,8 +244,10 @@ class Client:
 
         print(f"[{self.client_id}] Wrote deduplicated primes to {result_filename}")
 
-        # Upload result to file server
-        success = self._upload_file(result_path, result_filename, fileserver_address)
+        # Upload result to primary file server
+        success = self._upload_file(
+            result_path, result_filename, primary_fileserver_addr
+        )
 
         # Delete local file only if upload succeeded
         if success:
@@ -234,7 +257,7 @@ class Client:
         return success
 
     def merge_files(
-        self, file1: str, file2: str, task_id: str, fileserver_address: str
+        self, file1: str, file2: str, task_id: str, primary_fileserver_addr: str
     ) -> bool:
         """Download two deduplicated files, merge them, and upload result to file server."""
         print(f"[{self.client_id}] Started merge task: {task_id}")
@@ -243,8 +266,8 @@ class Client:
 
         try:
             # Download both files from file server
-            path1 = self._fetch_file(file1, fileserver_address)
-            path2 = self._fetch_file(file2, fileserver_address)
+            path1 = self._fetch_file(file1)
+            path2 = self._fetch_file(file2)
 
             # Merge and deduplicate primes
             primes = set()
@@ -270,9 +293,9 @@ class Client:
 
             print(f"[{self.client_id}] Wrote merged result to {merged_filename}")
 
-            # Upload result to file server
+            # Upload result to primary file server
             success = self._upload_file(
-                merged_path, merged_filename, fileserver_address
+                merged_path, merged_filename, primary_fileserver_addr
             )
 
             # Delete local file only if upload succeeded
@@ -436,14 +459,16 @@ class Client:
 
 def main():
     """Entry point for client."""
-    if len(sys.argv) != 3:
-        print("Usage: python -m client.client <client_id> <coordinator_address>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Distributed prime number client")
+    parser.add_argument("client_id", help="Unique client identifier")
+    parser.add_argument("coordinator_address", help="Coordinator address")
+    parser.add_argument(
+        "--fileservers", nargs="+", required=True, help="List of file server addresses"
+    )
 
-    client_id = sys.argv[1]
-    coordinator_addr = sys.argv[2]
+    args = parser.parse_args()
 
-    client = Client(client_id, coordinator_addr)
+    client = Client(args.client_id, args.coordinator_address, args.fileservers)
     client.run()
 
 
