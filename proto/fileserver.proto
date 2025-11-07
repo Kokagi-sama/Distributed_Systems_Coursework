@@ -28,6 +28,7 @@ message FileMetadata {
     string filename = 1;
     int64 file_size = 2;
     string checksum = 3;
+    int64 version = 4;
 }
 
 message UploadResponse {
@@ -58,14 +59,10 @@ message HeartbeatResponse {
   bool success = 2;
 }
 
-message ReplicateFileMetadata {
-  string filename = 1;
-  int64 version = 2;
-}
 
 message ReplicateFileRequest {
   oneof payload {
-    ReplicateFileMetadata metadata = 1;
+    FileMetadata metadata = 1;
     bytes file_data = 2;
   }
 }
