@@ -1,3 +1,4 @@
+import hashlib
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from client.client import Client
@@ -316,3 +317,77 @@ def test_upload_includes_checksum(temp_test_file):
     assert metadata.atomic_upload is True
     assert metadata.checksum != ""
     assert len(metadata.checksum) == 64  # SHA-256 produces 64 hex chars
+
+
+def test_download_verifies_checksum(temp_test_file):
+    """Test that download verifies checksum from file server."""
+    client = Client("test-client", "localhost:50051")
+
+    file_content = temp_test_file.read_bytes()
+
+    # Compute correct checksum
+    sha256 = hashlib.sha256()
+    sha256.update(file_content)
+    correct_checksum = sha256.hexdigest()
+
+    # Create fetch chunks with checksum in metadata
+    fetch_chunks = [
+        fileserver_pb2.FileChunk(
+            metadata=fileserver_pb2.FileMetadata(
+                filename="test_numbers.txt",
+                file_size=len(file_content),
+                checksum=correct_checksum,
+            )
+        ),
+        fileserver_pb2.FileChunk(chunk_data=file_content),
+    ]
+
+    mock_stub = MagicMock()
+    mock_stub.FetchFile.return_value = iter(fetch_chunks)
+
+    with patch("grpc.insecure_channel"):
+        with patch(
+            "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
+        ):
+            # Should succeed with correct checksum
+            cached_path = client._fetch_file("test_numbers.txt", "localhost:50052")
+
+    assert cached_path.exists()
+    assert cached_path.read_bytes() == file_content
+
+
+def test_download_detects_checksum_mismatch(temp_test_file):
+    """Test that download detects checksum mismatch and raises error."""
+    client = Client("test-client", "localhost:50051")
+
+    file_content = temp_test_file.read_bytes()
+
+    # Use wrong checksum
+    wrong_checksum = "a" * 64
+
+    # Create fetch chunks with wrong checksum
+    fetch_chunks = [
+        fileserver_pb2.FileChunk(
+            metadata=fileserver_pb2.FileMetadata(
+                filename="test_numbers.txt",
+                file_size=len(file_content),
+                checksum=wrong_checksum,
+            )
+        ),
+        fileserver_pb2.FileChunk(chunk_data=file_content),
+    ]
+
+    mock_stub = MagicMock()
+    mock_stub.FetchFile.return_value = iter(fetch_chunks)
+
+    with patch("grpc.insecure_channel"):
+        with patch(
+            "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
+        ):
+            # Should raise RuntimeError on checksum mismatch
+            try:
+                client._fetch_file("test_numbers.txt", "localhost:50052")
+                assert False, "Expected RuntimeError for checksum mismatch"
+            except RuntimeError as e:
+                assert "Checksum verification failed" in str(e)
+                assert wrong_checksum in str(e)

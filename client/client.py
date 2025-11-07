@@ -76,15 +76,19 @@ class Client:
                     break
                 yield fileserver_pb2.FileChunk(chunk_data=chunk_data)
 
-    def _stream_fetch(self, chunk_stream, output_path: Path):
+    def _stream_fetch(self, chunk_stream, output_path: Path) -> str:
         """Receive chunks from file server and write to local file."""
+        server_checksum = ""
+
         with open(output_path, "wb") as f:
             for chunk in chunk_stream:
                 if chunk.HasField("metadata"):
-                    # Skip metadata chunk
-                    continue
+                    # Extract checksum from metadata
+                    server_checksum = chunk.metadata.checksum
                 elif chunk.HasField("chunk_data"):
                     f.write(chunk.chunk_data)
+
+        return server_checksum
 
     def _fetch_file(self, filename: str, fileserver_address: str) -> Path:
         """Fetch file from file server and cache it locally."""
@@ -106,9 +110,20 @@ class Client:
         cached_path = self.cache_dir / Path(filename).name
 
         try:
-            self._stream_fetch(chunk_stream, cached_path)
+            server_checksum = self._stream_fetch(chunk_stream, cached_path)
         except grpc.RpcError as e:
             raise FileNotFoundError(f"File {filename} not found: {e}")
+
+        # Verify checksum if provided by server
+        if server_checksum:
+            computed_checksum = self._compute_checksum(cached_path)
+            if computed_checksum != server_checksum:
+                # Delete corrupted file
+                cached_path.unlink()
+                raise RuntimeError(
+                    f"Checksum verification failed for {filename}: expected {server_checksum}, got {computed_checksum}"
+                )
+            print(f"[{self.client_id}] Successfully verified checksum for {filename}")
 
         print(
             f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}"
