@@ -380,7 +380,7 @@ def test_merge_files(file_servers, test_cache_dir):
 
 
 def test_upload_includes_checksum(temp_test_file, file_servers, test_cache_dir):
-    """Test that upload includes checksum and atomic_upload flag."""
+    """Test that upload includes checksum."""
     client = Client("test-client", "localhost:50051", file_servers, test_cache_dir)
 
     file_content = temp_test_file.read_bytes()
@@ -416,7 +416,6 @@ def test_upload_includes_checksum(temp_test_file, file_servers, test_cache_dir):
 
     assert success is True
     assert metadata is not None
-    assert metadata.atomic_upload is True
     assert metadata.checksum != ""
     assert len(metadata.checksum) == 64  # SHA-256 produces 64 hex chars
 

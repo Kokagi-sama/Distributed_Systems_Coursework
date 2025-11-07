@@ -76,7 +76,6 @@ class Client:
         metadata = fileserver_pb2.FileMetadata(
             filename=remote_filename,
             file_size=file_size,
-            atomic_upload=True,
             checksum=checksum,
         )
         yield fileserver_pb2.FileChunk(metadata=metadata)
