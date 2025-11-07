@@ -1,4 +1,5 @@
 import grpc
+import hashlib
 import sys
 import threading
 import time
@@ -38,15 +39,32 @@ class Client:
         print(f"[{client_id}] Client initialized")
         print(f"[{client_id}] Cache directory: {self.cache_dir}")
 
+    def _compute_checksum(self, filepath: Path, chunk_size: int = 65536) -> str:
+        """Compute SHA-256 checksum of file."""
+        sha256 = hashlib.sha256()
+        with open(filepath, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
     def _stream_upload(
         self, filepath: Path, remote_filename: str, chunk_size: int = 65536
     ):
         """Read local file and generate chunks for upload to file server."""
         file_size = filepath.stat().st_size
 
+        # Compute checksum
+        checksum = self._compute_checksum(filepath)
+
         # Send metadata first
         metadata = fileserver_pb2.FileMetadata(
-            filename=remote_filename, file_size=file_size
+            filename=remote_filename,
+            file_size=file_size,
+            atomic_upload=True,
+            checksum=checksum,
         )
         yield fileserver_pb2.FileChunk(metadata=metadata)
 

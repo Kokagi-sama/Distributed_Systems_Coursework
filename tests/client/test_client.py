@@ -274,3 +274,45 @@ def test_merge_files():
     assert result_numbers == [2, 3, 5, 7, 11, 13]
     assert mock_stub.FetchFile.call_count == 2
     assert mock_stub.UploadFile.call_count == 1
+
+
+def test_upload_includes_checksum(temp_test_file):
+    """Test that upload includes checksum and atomic_upload flag."""
+    client = Client("test-client", "localhost:50051")
+
+    file_content = temp_test_file.read_bytes()
+    capture_upload, uploaded_data = create_upload_capturer()
+
+    fetch_chunks = [
+        fileserver_pb2.FileChunk(
+            metadata=fileserver_pb2.FileMetadata(
+                filename="test_numbers.txt", file_size=len(file_content)
+            )
+        ),
+        fileserver_pb2.FileChunk(chunk_data=file_content),
+    ]
+
+    mock_stub = MagicMock()
+    mock_stub.FetchFile.return_value = iter(fetch_chunks)
+    mock_stub.UploadFile.side_effect = capture_upload
+
+    with patch("grpc.insecure_channel"):
+        with patch(
+            "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
+        ):
+            success = client.process_file(
+                str(temp_test_file.name), "localhost:50052", 0, 16
+            )
+
+    # Extract metadata from uploaded chunks
+    metadata = None
+    for chunk in uploaded_data:
+        if chunk.HasField("metadata"):
+            metadata = chunk.metadata
+            break
+
+    assert success is True
+    assert metadata is not None
+    assert metadata.atomic_upload is True
+    assert metadata.checksum != ""
+    assert len(metadata.checksum) == 64  # SHA-256 produces 64 hex chars
