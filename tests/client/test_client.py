@@ -1,4 +1,5 @@
 import hashlib
+import time
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from client.client import Client
@@ -78,7 +79,7 @@ def test_request_task_with_mock():
     client = Client("test-client", "localhost:50051")
 
     mock_response = coordinator_pb2.TaskResponse(
-        has_task=True,
+        status=coordinator_pb2.TASK_AVAILABLE,
         task_type=coordinator_pb2.FIND_PRIMES,
         filename="test.txt",
         primary_fileserver_addr="localhost:50052",
@@ -88,7 +89,7 @@ def test_request_task_with_mock():
     request = coordinator_pb2.TaskRequest(client_id=client.client_id)
     task = client.coordinator.RequestTask(request)
 
-    assert task.has_task is True
+    assert task.status == coordinator_pb2.TASK_AVAILABLE
     assert task.task_type == coordinator_pb2.FIND_PRIMES
     assert task.filename == "test.txt"
     assert task.primary_fileserver_addr == "localhost:50052"
@@ -113,13 +114,87 @@ def test_no_task_available():
     """Test handling when coordinator has no tasks."""
     client = Client("test-client", "localhost:50051")
 
-    mock_response = coordinator_pb2.TaskResponse(has_task=False)
+    mock_response = coordinator_pb2.TaskResponse(
+        status=coordinator_pb2.NO_TASK_AVAILABLE
+    )
     client.coordinator.RequestTask = Mock(return_value=mock_response)
 
     request = coordinator_pb2.TaskRequest(client_id=client.client_id)
     task = client.coordinator.RequestTask(request)
 
-    assert task.has_task is False
+    assert task.status == coordinator_pb2.NO_TASK_AVAILABLE
+
+
+def test_wait_for_dependencies():
+    """Test handling when coordinator returns WAIT_FOR_DEPENDENCIES."""
+    client = Client("test-client", "localhost:50051")
+
+    mock_response = coordinator_pb2.TaskResponse(
+        status=coordinator_pb2.WAIT_FOR_DEPENDENCIES
+    )
+    client.coordinator.RequestTask = Mock(return_value=mock_response)
+
+    request = coordinator_pb2.TaskRequest(client_id=client.client_id)
+    task = client.coordinator.RequestTask(request)
+
+    assert task.status == coordinator_pb2.WAIT_FOR_DEPENDENCIES
+
+
+def test_exponential_backoff_on_wait():
+    """Test exponential backoff when waiting for dependencies."""
+    client = Client("test-client", "localhost:50051")
+
+    wait_response = coordinator_pb2.TaskResponse(
+        status=coordinator_pb2.WAIT_FOR_DEPENDENCIES
+    )
+    task_response = coordinator_pb2.TaskResponse(
+        status=coordinator_pb2.TASK_AVAILABLE,
+        task_type=coordinator_pb2.FIND_PRIMES,
+        task_id="test_task",
+        filename="test.txt",
+        start_index=0,
+        end_index=10,
+        primary_fileserver_addr="localhost:50052",
+    )
+
+    client.coordinator.RequestTask = Mock(
+        side_effect=[wait_response, wait_response, task_response]
+    )
+    client.process_file = Mock(return_value=True)
+    client.coordinator.CompleteTask = Mock(
+        return_value=coordinator_pb2.TaskCompletionResponse(acknowledged=True)
+    )
+
+    sleep_times = []
+
+    def track_sleep(duration):
+        sleep_times.append(duration)
+
+    with patch("time.sleep", side_effect=track_sleep):
+        base_wait_time = 5
+        max_wait_time = 60
+        current_wait_time = base_wait_time
+
+        for _ in range(3):
+            request = coordinator_pb2.TaskRequest(client_id=client.client_id)
+            task = client.coordinator.RequestTask(request)
+
+            if task.status == coordinator_pb2.TASK_AVAILABLE:
+                client.process_file(
+                    task.filename,
+                    task.primary_fileserver_addr,
+                    task.start_index,
+                    task.end_index,
+                )
+                break
+            elif task.status == coordinator_pb2.WAIT_FOR_DEPENDENCIES:
+                time.sleep(current_wait_time)
+                current_wait_time = min(current_wait_time * 2, max_wait_time)
+
+    assert len(sleep_times) == 2
+    assert sleep_times[0] == 5
+    assert sleep_times[1] == 10
+    assert client.process_file.call_count == 1
 
 
 def test_heartbeat_with_mock():

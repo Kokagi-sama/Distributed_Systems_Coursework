@@ -13,12 +13,18 @@ enum TaskType {
     MERGE = 1;
 }
 
+enum TaskStatus {
+    TASK_AVAILABLE = 0;
+    NO_TASK_AVAILABLE = 1;
+    WAIT_FOR_DEPENDENCIES = 2;
+}
+
 message TaskRequest {
     string client_id = 1;
 }
 
 message TaskResponse {
-    bool has_task = 1;
+    TaskStatus status = 1;
     TaskType task_type = 2;
     string primary_fileserver_addr = 3;
     string task_id = 4;

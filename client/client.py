@@ -326,8 +326,10 @@ class Client:
         # Start heartbeat thread
         self._start_heartbeat()
 
-        no_task_attempts = 0
-        max_no_task_attempts = 3
+        # Exponential backoff parameters
+        base_wait_time = 5
+        max_wait_time = 60
+        current_wait_time = base_wait_time
 
         while True:
             try:
@@ -336,18 +338,19 @@ class Client:
                 request = coordinator_pb2.TaskRequest(client_id=self.client_id)
                 task = self.coordinator.RequestTask(request)
 
-                if not task.has_task:
-                    no_task_attempts += 1
-                    if no_task_attempts >= max_no_task_attempts:
-                        print(
-                            f"[{self.client_id}] Info: No tasks available after {max_no_task_attempts} attempts"
-                        )
-                        break
-                    print(f"[{self.client_id}] Info: No tasks available")
-                    time.sleep(5)
+                # Handle different task statuses
+                if task.status == coordinator_pb2.TASK_AVAILABLE:
+                    # Reset wait time on successful task assignment
+                    current_wait_time = base_wait_time
+                elif task.status == coordinator_pb2.WAIT_FOR_DEPENDENCIES:
+                    print(f"[{self.client_id}] Waiting for task dependencies")
+                    time.sleep(current_wait_time)
+                    # Exponential backoff
+                    current_wait_time = min(current_wait_time * 2, max_wait_time)
                     continue
-
-                no_task_attempts = 0
+                elif task.status == coordinator_pb2.NO_TASK_AVAILABLE:
+                    print(f"[{self.client_id}] Stopped: no tasks available")
+                    break
 
                 print(f"[{self.client_id}] Received task from coordinator")
                 print(f"[{self.client_id}] Task type: {task.task_type}")
