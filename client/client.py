@@ -54,9 +54,7 @@ class Client:
                 sha256.update(chunk)
         return sha256.hexdigest()
 
-    def _stream_upload(
-        self, filepath: Path, remote_filename: str, chunk_size: int = 65536
-    ):
+    def _stream_upload(self, filepath: Path, remote_filename: str, chunk_size: int = 65536):
         """Read local file and generate chunks for upload to file server."""
         file_size = filepath.stat().st_size
 
@@ -67,7 +65,6 @@ class Client:
         metadata = fileserver_pb2.FileMetadata(
             filename=remote_filename,
             file_size=file_size,
-            atomic_upload=True,
             checksum=checksum,
         )
         yield fileserver_pb2.FileChunk(metadata=metadata)
@@ -108,9 +105,7 @@ class Client:
         last_error = None
         for fileserver_address in servers:
             try:
-                print(
-                    f"[{self.client_id}] Fetching {filename} from {fileserver_address}"
-                )
+                print(f"[{self.client_id}] Fetching {filename} from {fileserver_address}")
                 fileserver_channel = grpc.insecure_channel(fileserver_address)
                 fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
 
@@ -154,33 +149,110 @@ class Client:
             f"Failed to fetch {filename} from all file servers: {last_error}"
         )
 
-    def _upload_file(
-        self, local_filepath: Path, remote_filename: str, fileserver_address: str
-    ) -> bool:
-        """Upload file to file server."""
-        print(f"[{self.client_id}] Uploading {remote_filename} to {fileserver_address}")
+    def _upload_file(self, local_filepath: Path, remote_filename: str, fileserver_address: str) -> bool:
+        """Upload file to file server.
 
-        try:
-            # Connect to file server
-            fileserver_channel = grpc.insecure_channel(fileserver_address)
-            fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
+        On failure, rotate through 'self.fileserver_addresses' in order to try a different file server. If the server responds with a redirect to a new primary, immediately switch to that address and reset backoff and rotation.
+        """
 
-            # Upload file via RPC
-            chunk_iterator = self._stream_upload(local_filepath, remote_filename)
-            response = fileserver_stub.UploadFile(chunk_iterator)
+        # Build rotation list: start with the provided address, then others in random order
+        others = [addr for addr in self.fileserver_addresses if addr != fileserver_address]
+        random.shuffle(others)
+        servers = [fileserver_address] + others if others else [fileserver_address]
+        idx = 0
 
-            if not response.success:
-                print(f"[{self.client_id}] Upload failed: {response.error_message}")
-                return False
+        current_fileserver_address = servers[idx]
+        backoff = 1.0
+        max_backoff = 30.0
 
-            print(
-                f"[{self.client_id}] Successfully uploaded {remote_filename} to {fileserver_address}"
-            )
-            return True
+        while True:
+            print(f"[{self.client_id}] Uploading {remote_filename} to {current_fileserver_address}")
+            fileserver_channel = None
 
-        except Exception as e:
-            print(f"[{self.client_id}] Upload error: {e}")
-            return False
+            try:
+                # Connect to file server
+                fileserver_channel = grpc.insecure_channel(current_fileserver_address)
+                fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
+
+                # Fresh iterator each attempt; generators cannot be reused
+                chunk_iterator = self._stream_upload(local_filepath, remote_filename)
+
+                # Timeout to avoid hanging; wait_for_ready tolerates brief unavailability
+                response = fileserver_stub.UploadFile(chunk_iterator, timeout=60.0, wait_for_ready=True)
+
+                if response.success:
+                    print(f"[{self.client_id}] Successfully uploaded {remote_filename} to {current_fileserver_address}")
+                    return True
+
+                print(f"[{self.client_id}] Upload to {current_fileserver_address} failed: {response.error_message}")
+
+                # Follow redirect if provided and different
+                redirect = getattr(response, "new_primary_fileserver", "")
+                if redirect and redirect != current_fileserver_address:
+                    print(f"[{self.client_id}] Redirecting to primary: {redirect}")
+                    # Reset rotation to prioritize the redirected address; randomize the rest
+                    others = [addr for addr in self.fileserver_addresses if addr != redirect]
+                    random.shuffle(others)
+                    servers = [redirect] + others if others else [redirect]
+                    idx = 0
+                    current_fileserver_address = servers[idx]
+                    backoff = 1.0  # reset after redirect
+                else:
+                    # Exponential backoff with jitter
+                    sleep_seconds = backoff + random.uniform(0, 0.5)
+                    print(f"[{self.client_id}] Retry in {sleep_seconds:.1f}s...")
+                    time.sleep(sleep_seconds)
+                    backoff = min(max_backoff, backoff * 2)
+
+                    # Rotate to the next fileserver for the next attempt
+                    prev_addr = current_fileserver_address
+                    idx = (idx + 1) % len(servers)
+                    current_fileserver_address = servers[idx]
+                    if current_fileserver_address != prev_addr:
+                        print(f"[{self.client_id}] Switching to next fileserver: {current_fileserver_address}")
+                        backoff = 1.0  # reset when switching servers
+                    continue
+
+            except grpc.RpcError as e:
+                code = e.code().name if hasattr(e, "code") else "UNKNOWN"
+                print(f"[{self.client_id}] RPC error to {current_fileserver_address}: {code} - {e}")
+
+                # Backoff, then rotate to a different server on RPC errors as well
+                sleep_seconds = backoff + random.uniform(0, 0.5)
+                print(f"[{self.client_id}] Retry in {sleep_seconds:.1f}s...")
+                time.sleep(sleep_seconds)
+                backoff = min(max_backoff, backoff * 2)
+
+                prev_addr = current_fileserver_address
+                idx = (idx + 1) % len(servers)
+                current_fileserver_address = servers[idx]
+                if current_fileserver_address != prev_addr:
+                    print(f"[{self.client_id}] Switching to next fileserver after RPC error: {current_fileserver_address}")
+                    backoff = 1.0
+                continue
+
+            except Exception as e:
+                print(f"[{self.client_id}] Upload to {current_fileserver_address} error: {e}")
+                sleep_seconds = backoff + random.uniform(0, 0.5)
+                print(f"[{self.client_id}] Retry in {sleep_seconds:.1f}s...")
+                time.sleep(sleep_seconds)
+                backoff = min(max_backoff, backoff * 2)
+
+                # Rotate to the next fileserver for the next attempt
+                prev_addr = current_fileserver_address
+                idx = (idx + 1) % len(servers)
+                current_fileserver_address = servers[idx]
+                if current_fileserver_address != prev_addr:
+                    print(f"[{self.client_id}] Switching to next fileserver: {current_fileserver_address}")
+                    backoff = 1.0
+                continue
+
+            finally:
+                try:
+                    if fileserver_channel is not None:
+                        fileserver_channel.close()
+                except Exception as e:
+                    print(f"[{self.client_id}] Unable to close connection to {current_fileserver_address} error: {e}")
 
     def process_file(
         self,
@@ -197,9 +269,7 @@ class Client:
             print(f"[{self.client_id}] Error: {e}")
             return False
 
-        print(
-            f"[{self.client_id}] Started processing {filename} from line {start_index} to {end_index - 1}"
-        )
+        print(f"[{self.client_id}] Started processing {filename} from line {start_index} to {end_index - 1}")
 
         # Find and deduplicate primes
         primes = set()
@@ -245,9 +315,7 @@ class Client:
         print(f"[{self.client_id}] Wrote deduplicated primes to {result_filename}")
 
         # Upload result to primary file server
-        success = self._upload_file(
-            result_path, result_filename, primary_fileserver_addr
-        )
+        success = self._upload_file(result_path, result_filename, primary_fileserver_addr)
 
         # Delete local file only if upload succeeded
         if success:
@@ -294,9 +362,7 @@ class Client:
             print(f"[{self.client_id}] Wrote merged result to {merged_filename}")
 
             # Upload result to primary file server
-            success = self._upload_file(
-                merged_path, merged_filename, primary_fileserver_addr
-            )
+            success = self._upload_file(merged_path, merged_filename, primary_fileserver_addr)
 
             # Delete local file only if upload succeeded
             if success:
@@ -462,9 +528,7 @@ def main():
     parser = argparse.ArgumentParser(description="Distributed prime number client")
     parser.add_argument("client_id", help="Unique client identifier")
     parser.add_argument("coordinator_address", help="Coordinator address")
-    parser.add_argument(
-        "--fileservers", nargs="+", required=True, help="List of file server addresses"
-    )
+    parser.add_argument("--fileservers", nargs="+", required=True, help="List of file server addresses")
 
     args = parser.parse_args()
 

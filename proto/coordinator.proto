@@ -4,8 +4,14 @@ package coordinator;
 
 service Coordinator {
     rpc RequestTask(TaskRequest) returns (TaskResponse);
-    rpc CompleteTask(TaskCompletionRequest) returns (TaskCompletionResponse);
+    rpc UpdateTaskStatus(TaskStatusRequest) returns (TaskStatusResponse);
+
     rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+enum ClientTaskStatus {
+    COMPLETED = 0;
+    WAIT = 1;
 }
 
 enum TaskType {
@@ -13,38 +19,37 @@ enum TaskType {
     MERGE = 1;
 }
 
-enum TaskStatus {
-    TASK_AVAILABLE = 0;
-    NO_TASK_AVAILABLE = 1;
-    WAIT_FOR_DEPENDENCIES = 2;
-}
-
 message TaskRequest {
     string client_id = 1;
 }
 
 message TaskResponse {
-    TaskStatus status = 1;
-    TaskType task_type = 2;
-    string primary_fileserver_addr = 3;
-    string task_id = 4;
+    string task_id = 1;
+    bool has_task = 2;
+    TaskType task_type = 3;
+    ClientTaskStatus client_task_status = 4;
 
     // For FIND_PRIMES task:
     string filename = 5;
-    int64 start_index = 6;
-    int64 end_index = 7;
 
     // For MERGE task:
-    string file1 = 8;
-    string file2 = 9;
+    string file1 = 6;
+    string file2 = 7;
+
+    // FOR SPLIT task:
+    int64 start_index = 8;
+    int64 end_index = 9;
 }
 
-message TaskCompletionRequest {
+message TaskStatusRequest {
     string client_id = 1;
-    string task_id = 2;
+    ClientTaskStatus client_task_status = 2;
+    
+    // FOR OUTPUT FILE:
+    string output_filename = 3;
 }
 
-message TaskCompletionResponse {
+message TaskStatusResponse {
     bool acknowledged = 1;
 }
 

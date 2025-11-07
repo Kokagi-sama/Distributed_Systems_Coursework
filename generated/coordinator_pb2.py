@@ -24,29 +24,29 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11\x63oordinator.proto\x12\x0b\x63oordinator\" \n\x0bTaskRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\xeb\x01\n\x0cTaskResponse\x12\'\n\x06status\x18\x01 \x01(\x0e\x32\x17.coordinator.TaskStatus\x12(\n\ttask_type\x18\x02 \x01(\x0e\x32\x15.coordinator.TaskType\x12\x1f\n\x17primary_fileserver_addr\x18\x03 \x01(\t\x12\x0f\n\x07task_id\x18\x04 \x01(\t\x12\x10\n\x08\x66ilename\x18\x05 \x01(\t\x12\x13\n\x0bstart_index\x18\x06 \x01(\x03\x12\x11\n\tend_index\x18\x07 \x01(\x03\x12\r\n\x05\x66ile1\x18\x08 \x01(\t\x12\r\n\x05\x66ile2\x18\t \x01(\t\";\n\x15TaskCompletionRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\x12\x0f\n\x07task_id\x18\x02 \x01(\t\".\n\x16TaskCompletionResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"%\n\x10HeartbeatRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\")\n\x11HeartbeatResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08*&\n\x08TaskType\x12\x0f\n\x0b\x46IND_PRIMES\x10\x00\x12\t\n\x05MERGE\x10\x01*R\n\nTaskStatus\x12\x12\n\x0eTASK_AVAILABLE\x10\x00\x12\x15\n\x11NO_TASK_AVAILABLE\x10\x01\x12\x19\n\x15WAIT_FOR_DEPENDENCIES\x10\x02\x32\xfa\x01\n\x0b\x43oordinator\x12\x42\n\x0bRequestTask\x12\x18.coordinator.TaskRequest\x1a\x19.coordinator.TaskResponse\x12W\n\x0c\x43ompleteTask\x12\".coordinator.TaskCompletionRequest\x1a#.coordinator.TaskCompletionResponse\x12N\n\rSendHeartbeat\x12\x1d.coordinator.HeartbeatRequest\x1a\x1e.coordinator.HeartbeatResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11\x63oordinator.proto\x12\x0b\x63oordinator\" \n\x0bTaskRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\xee\x01\n\x0cTaskResponse\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\x10\n\x08has_task\x18\x02 \x01(\x08\x12(\n\ttask_type\x18\x03 \x01(\x0e\x32\x15.coordinator.TaskType\x12\x39\n\x12\x63lient_task_status\x18\x04 \x01(\x0e\x32\x1d.coordinator.ClientTaskStatus\x12\x10\n\x08\x66ilename\x18\x05 \x01(\t\x12\r\n\x05\x66ile1\x18\x06 \x01(\t\x12\r\n\x05\x66ile2\x18\x07 \x01(\t\x12\x13\n\x0bstart_index\x18\x08 \x01(\x03\x12\x11\n\tend_index\x18\t \x01(\x03\"z\n\x11TaskStatusRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\x12\x39\n\x12\x63lient_task_status\x18\x02 \x01(\x0e\x32\x1d.coordinator.ClientTaskStatus\x12\x17\n\x0foutput_filename\x18\x03 \x01(\t\"*\n\x12TaskStatusResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"%\n\x10HeartbeatRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\")\n\x11HeartbeatResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08*+\n\x10\x43lientTaskStatus\x12\r\n\tCOMPLETED\x10\x00\x12\x08\n\x04WAIT\x10\x01*&\n\x08TaskType\x12\x0f\n\x0b\x46IND_PRIMES\x10\x00\x12\t\n\x05MERGE\x10\x01\x32\xf6\x01\n\x0b\x43oordinator\x12\x42\n\x0bRequestTask\x12\x18.coordinator.TaskRequest\x1a\x19.coordinator.TaskResponse\x12S\n\x10UpdateTaskStatus\x12\x1e.coordinator.TaskStatusRequest\x1a\x1f.coordinator.TaskStatusResponse\x12N\n\rSendHeartbeat\x12\x1d.coordinator.HeartbeatRequest\x1a\x1e.coordinator.HeartbeatResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'coordinator_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_TASKTYPE']._serialized_start=497
-  _globals['_TASKTYPE']._serialized_end=535
-  _globals['_TASKSTATUS']._serialized_start=537
-  _globals['_TASKSTATUS']._serialized_end=619
+  _globals['_CLIENTTASKSTATUS']._serialized_start=559
+  _globals['_CLIENTTASKSTATUS']._serialized_end=602
+  _globals['_TASKTYPE']._serialized_start=604
+  _globals['_TASKTYPE']._serialized_end=642
   _globals['_TASKREQUEST']._serialized_start=34
   _globals['_TASKREQUEST']._serialized_end=66
   _globals['_TASKRESPONSE']._serialized_start=69
-  _globals['_TASKRESPONSE']._serialized_end=304
-  _globals['_TASKCOMPLETIONREQUEST']._serialized_start=306
-  _globals['_TASKCOMPLETIONREQUEST']._serialized_end=365
-  _globals['_TASKCOMPLETIONRESPONSE']._serialized_start=367
-  _globals['_TASKCOMPLETIONRESPONSE']._serialized_end=413
-  _globals['_HEARTBEATREQUEST']._serialized_start=415
-  _globals['_HEARTBEATREQUEST']._serialized_end=452
-  _globals['_HEARTBEATRESPONSE']._serialized_start=454
-  _globals['_HEARTBEATRESPONSE']._serialized_end=495
-  _globals['_COORDINATOR']._serialized_start=622
-  _globals['_COORDINATOR']._serialized_end=872
+  _globals['_TASKRESPONSE']._serialized_end=307
+  _globals['_TASKSTATUSREQUEST']._serialized_start=309
+  _globals['_TASKSTATUSREQUEST']._serialized_end=431
+  _globals['_TASKSTATUSRESPONSE']._serialized_start=433
+  _globals['_TASKSTATUSRESPONSE']._serialized_end=475
+  _globals['_HEARTBEATREQUEST']._serialized_start=477
+  _globals['_HEARTBEATREQUEST']._serialized_end=514
+  _globals['_HEARTBEATRESPONSE']._serialized_start=516
+  _globals['_HEARTBEATRESPONSE']._serialized_end=557
+  _globals['_COORDINATOR']._serialized_start=645
+  _globals['_COORDINATOR']._serialized_end=891
 # @@protoc_insertion_point(module_scope)
