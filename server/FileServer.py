@@ -19,6 +19,7 @@ import os
 import time
 import random
 import pickle
+import hashlib  # <-- IMPORT ADDED
 from pathlib import Path
 # Added typing imports
 from typing import List, Dict, Optional, Set, Any, Iterator
@@ -114,70 +115,93 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             print(f"[{self.server_id}] Wrote to disk: {file_path}")
         except Exception as e:
             print(f"[{self.server_id}] Disk write failed for {filename}: {e}")
-    
+
+    # <-- METHOD ADDED -->
+    def _compute_checksum(self, data: bytes) -> str:
+        """Compute SHA-256 checksum of data."""
+        sha256 = hashlib.sha256()
+        sha256.update(data)
+        return sha256.hexdigest()
+
     # ========================================================================
     # CLIENT-FACING FILE OPERATIONS
     # ========================================================================
     
+    # <-- METHOD MODIFIED TO MATCH CLIENT (1).py -->
     def FetchFile(
-        self, request: fileserver_pb2.MetaData, context: grpc.ServicerContext
-    ) -> Iterator[fileserver_pb2.FetchResponse]:
+        self, request: fileserver_pb2.FetchRequest, context: grpc.ServicerContext
+    ) -> Iterator[fileserver_pb2.FileChunk]:
         """
         Fetch file in chunks (Server-Streaming RPC).
+        Sends metadata (with checksum) first, then data chunks.
         """
-        # Reconstruct filename from MetaData
-        filename = f"{request.filename}{request.extension}"
+        filename = request.filename
         
         print(f"[{self.server_id}] FetchFile (streaming) request: {filename}")
         
         with self.lock:
             if filename not in self.files:
                 print(f"[{self.server_id}] File not found: {filename}")
-                # Send one error message and stop
-                yield fileserver_pb2.FetchResponse(
-                    success=False,
-                    error_message=f"File not found: {filename}",
-                )
-                return  # Stop the generator
+                # Abort RPC, which client will catch as an exception
+                context.abort(grpc.StatusCode.NOT_FOUND, f"File not found: {filename}")
+                return
             
             # Get file data from internal storage
             file_data = self.files[filename]["data"]
         
-        # Send the file in 1MB chunks
+        # Compute checksum to send to client
+        checksum = self._compute_checksum(file_data)
+        
+        # 1. Send metadata first (as expected by client)
+        metadata = fileserver_pb2.FileMetadata(
+            filename=filename,
+            file_size=len(file_data),
+            checksum=checksum
+        )
+        yield fileserver_pb2.FileChunk(metadata=metadata)
+
+        # 2. Send the file in 1MB chunks
         chunk_size = 1024 * 1024  # 1MB
         for i in range(0, len(file_data), chunk_size):
-            chunk = file_data[i : i + chunk_size]
-            yield fileserver_pb2.FetchResponse(
-                success=True,
-                file_data=chunk
-            )
+            chunk_data = file_data[i : i + chunk_size]
+            yield fileserver_pb2.FileChunk(chunk_data=chunk_data)
         
         print(f"[{self.server_id}] Finished streaming {filename}")
     
+    # <-- METHOD MODIFIED TO MATCH CLIENT (1).py AND ADD CHECKSUM -->
     def UploadFile(
-        self, request_iterator: Iterator[fileserver_pb2.UploadRequest], context: grpc.ServicerContext
+        self, request_iterator: Iterator[fileserver_pb2.FileChunk], context: grpc.ServicerContext
     ) -> fileserver_pb2.UploadResponse:
         """
         Upload/Store file from chunks (Client-Streaming RPC).
         Only leader can accept writes!
+        Verifies client's checksum.
         """
         print(f"[{self.server_id}] UploadFile (streaming) request received...")
         
-        metadata: Optional[fileserver_pb2.MetaData] = None
+        metadata: Optional[fileserver_pb2.FileMetadata] = None
         file_chunks = []
+        client_checksum = ""
+        filename = ""
         
         try:
             # 1. Loop over the client's stream
-            for request in request_iterator:
+            for chunk in request_iterator:
                 # Check the 'oneof' field to see what kind of data this is
-                if request.HasField("metadata"):
+                if chunk.HasField("metadata"):
                     if metadata is not None:
                         raise ValueError("Client sent metadata twice")
-                    metadata = request.metadata
-                elif request.HasField("file_data"):
+                    metadata = chunk.metadata
+                    filename = metadata.filename
+                    client_checksum = metadata.checksum
+                    print(f"[{self.server_id}] Receiving file: {filename}")
+                    if client_checksum:
+                        print(f"[{self.server_id}] Client checksum: {client_checksum}")
+
+                elif chunk.HasField("chunk_data"):
                     if metadata is None:
                         raise ValueError("Client sent file data before metadata")
-                    file_chunks.append(request.file_data)
+                    file_chunks.append(chunk.chunk_data)
             
             if not metadata:
                 raise ValueError("Client sent no metadata")
@@ -189,21 +213,37 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             )
 
         # 2. Reassemble the file
-        filename = f"{metadata.filename}{metadata.extension}"
         file_data = b"".join(file_chunks)
         
         print(f"[{self.server_id}] Stream complete for {filename} ({len(file_data)} bytes)")
         
-        # 3. Acquire lock and perform the write (if leader)
+        # 3. ***CHECKSUM VERIFICATION***
+        if not client_checksum:
+            print(f"[{self.server_id}] Warning: Client did not provide a checksum for {filename}.")
+        else:
+            computed_checksum = self._compute_checksum(file_data)
+            if computed_checksum != client_checksum:
+                error_msg = f"Checksum verification failed for {filename}: expected {client_checksum}, got {computed_checksum}"
+                print(f"[{self.server_id}] {error_msg}")
+                return fileserver_pb2.UploadResponse(
+                    success=False, error_message=error_msg
+                )
+            print(f"[{self.server_id}] Successfully verified checksum for {filename}")
+
+        # 4. Acquire lock and perform the write (if leader)
         with self.lock:
             # Check if we're the leader
             if not self._is_leader():
+                leader_addr = self.leader_id or ""
                 error_msg = (
-                    f"Not leader. Current leader: {self.leader_id or 'unknown'}"
+                    f"Not leader. Current leader: {leader_addr or 'unknown'}"
                 )
                 print(f"[{self.server_id}] Rejected upload: {error_msg}")
+                # Send redirect field, as expected by client
                 return fileserver_pb2.UploadResponse(
-                    success=False, error_message=error_msg
+                    success=False, 
+                    error_message=error_msg,
+                    new_primary_fileserver=leader_addr
                 )
             
             # Write to physical disk
@@ -223,10 +263,10 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             
             print(f"[{self.server_id}] Stored {filename} (version {new_version})")
         
-        # 4. Replicate to followers
+        # 5. Replicate to followers
         self._replicate_to_followers(filename)
         
-        # 5. Send the single response
+        # 6. Send the single response
         return fileserver_pb2.UploadResponse(
             success=True, error_message=""
         )
