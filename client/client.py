@@ -27,12 +27,21 @@ class Client:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.fileserver_addresses = fileserver_addresses
 
+        # Clean up orphaned .tmp files from previous crashes or errors
+        tmp_files = list(self.cache_dir.glob("*.tmp"))
+        if tmp_files:
+            print(f"[{client_id}] Cleaning up {len(tmp_files)} orphaned temp files")
+            for tmp_file in tmp_files:
+                try:
+                    tmp_file.unlink()
+                except Exception as e:
+                    print(
+                        f"[{client_id}] Warning: Could not remove {tmp_file.name}: {e}"
+                    )
+
         # Connect to coordinator via gRPC
         coordinator_channel = grpc.insecure_channel(coordinator_address)
         self.coordinator = coordinator_pb2_grpc.CoordinatorStub(coordinator_channel)
-
-        # File cache
-        self.cached_files = {}
 
         # Heartbeat control
         self.heartbeat_interval = heartbeat_interval
@@ -81,25 +90,36 @@ class Client:
                 yield fileserver_pb2.FileChunk(chunk_data=chunk_data)
 
     def _stream_fetch(self, chunk_stream, output_path: Path) -> str:
-        """Receive chunks from file server and write to local file."""
+        """Receive chunks from file server and write atomically."""
         server_checksum = ""
+        tmp_path = Path(str(output_path) + ".tmp")
 
-        with open(output_path, "wb") as f:
-            for chunk in chunk_stream:
-                if chunk.HasField("metadata"):
-                    # Extract checksum from metadata
-                    server_checksum = chunk.metadata.checksum
-                elif chunk.HasField("chunk_data"):
-                    f.write(chunk.chunk_data)
+        try:
+            with open(tmp_path, "wb") as f:
+                for chunk in chunk_stream:
+                    if chunk.HasField("metadata"):
+                        server_checksum = chunk.metadata.checksum
+                    elif chunk.HasField("chunk_data"):
+                        f.write(chunk.chunk_data)
 
-        return server_checksum
+            tmp_path.rename(output_path)
+            return server_checksum
+
+        except Exception as e:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
+            raise e
 
     def _fetch_file(self, filename: str) -> Path:
         """Fetch file from file server with random selection and failover."""
-        # Return cached version if available
-        if filename in self.cached_files:
-            print(f"[{self.client_id}] Using cached {filename}")
-            return self.cached_files[filename]
+        # Check if file exists on disk
+        local_path = self.cache_dir / Path(filename).name
+        if local_path.exists():
+            print(f"[{self.client_id}] Using local {filename}")
+            return local_path
 
         # Try file servers in random order for load balancing
         servers = self.fileserver_addresses.copy()
@@ -138,8 +158,6 @@ class Client:
                 print(
                     f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}"
                 )
-
-                self.cached_files[filename] = cached_path
                 print(f"[{self.client_id}] Cached {filename} locally")
                 return cached_path
 
@@ -232,29 +250,35 @@ class Client:
             f"[{self.client_id}] Finished processing {filename}: found {len(primes):,} unique primes from line {start_index} to {end_index - 1}"
         )
 
-        # Write sorted primes to local file
+        # Write sorted primes atomically
         result_filename = (
             f"{Path(filename).stem}_range_{start_index}_{end_index}_primes.txt"
         )
         result_path = self.cache_dir / result_filename
+        tmp_path = Path(str(result_path) + ".tmp")
 
-        with open(result_path, "w") as f:
-            for prime in sorted(primes):
-                f.write(f"{prime}\n")
+        try:
+            with open(tmp_path, "w") as f:
+                for prime in sorted(primes):
+                    f.write(f"{prime}\n")
 
-        print(f"[{self.client_id}] Wrote deduplicated primes to {result_filename}")
+            tmp_path.rename(result_path)
+            print(f"[{self.client_id}] Wrote deduplicated primes to {result_filename}")
 
-        # Upload result to primary file server
-        success = self._upload_file(
-            result_path, result_filename, primary_fileserver_addr
-        )
+            # Upload result to primary file server
+            success = self._upload_file(
+                result_path, result_filename, primary_fileserver_addr
+            )
+            return success
 
-        # Delete local file only if upload succeeded
-        if success:
-            result_path.unlink()
-            print(f"[{self.client_id}] Deleted local {result_filename}")
-
-        return success
+        except Exception as e:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
+            print(f"[{self.client_id}] Error writing result: {e}")
+            return False
 
     def merge_files(
         self, file1: str, file2: str, task_id: str, primary_fileserver_addr: str
@@ -263,6 +287,10 @@ class Client:
         print(f"[{self.client_id}] Started merge task: {task_id}")
         print(f"[{self.client_id}]   File 1: {file1}")
         print(f"[{self.client_id}]   File 2: {file2}")
+
+        merged_filename = f"merged_{task_id}.txt"
+        merged_path = self.cache_dir / merged_filename
+        tmp_path = Path(str(merged_path) + ".tmp")
 
         try:
             # Download both files from file server
@@ -283,29 +311,26 @@ class Client:
                 f"[{self.client_id}] Finished merging: {len(primes):,} unique primes total"
             )
 
-            # Write sorted merged result to local file
-            merged_filename = f"merged_{task_id}.txt"
-            merged_path = self.cache_dir / merged_filename
-
-            with open(merged_path, "w") as f:
+            # Write sorted merged result atomically
+            with open(tmp_path, "w") as f:
                 for prime in sorted(primes):
                     f.write(f"{prime}\n")
 
+            tmp_path.rename(merged_path)
             print(f"[{self.client_id}] Wrote merged result to {merged_filename}")
 
             # Upload result to primary file server
             success = self._upload_file(
                 merged_path, merged_filename, primary_fileserver_addr
             )
-
-            # Delete local file only if upload succeeded
-            if success:
-                merged_path.unlink()
-                print(f"[{self.client_id}] Deleted local {merged_filename}")
-
             return success
 
         except Exception as e:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
             print(f"[{self.client_id}] Merge error: {e}")
             return False
 
