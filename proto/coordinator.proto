@@ -44,22 +44,12 @@ message TaskResponse {
 message TaskStatusRequest {
     string client_id = 1;
     ClientTaskStatus client_task_status = 2;
-}
-
-message TaskStatusResponse {
-    string task_id = 1;
-    bool acknowledged = 2;
-}
-
-message TaskCompletionRequest {
-    string client_id = 1;
-    string task_id = 2;
     
     // FOR OUTPUT FILE:
     string output_filename = 3;
 }
 
-message TaskCompletionResponse {
+message TaskStatusResponse {
     bool acknowledged = 1;
 }
 
