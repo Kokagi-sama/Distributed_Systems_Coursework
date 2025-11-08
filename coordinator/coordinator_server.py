@@ -73,6 +73,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         """
         with self.lock:
             if client_id not in self.clients:
+                print(f"Registering new client: {client_id}")
                 # [alive_status, last_heartbeat_time, assigned_task_id]
                 self.clients[client_id] = [True, time.time(), 0]
             else:
@@ -147,7 +148,6 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
                     if size_temp > 0:
                         self.state['pending_prime'].append(
                             (filename, size - size_temp, int(size)))
-            print(self.state['pending_prime'])
 
     def check_processing_complete(self):
         """Checks if all processing is completed
@@ -186,6 +186,8 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
             elif len(self.state['pending_de_duplication']) == 1:
                 if (self.check_processing_complete()):
                     self.result_filename = self.state['pending_de_duplication'][0]
+                    print(
+                        f"Processing complete. Final result file: {self.result_filename}")
                     return None
             else:
                 return None  # No tasks available
@@ -322,14 +324,11 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         client_id = request.client_id
         print(f"Client {client_id} is requesting a task.")
         self.register_client(client_id)
-        print(f"Registered client {client_id} for task request.")
         task = self.assign_task(client_id)
         # No task available
         if not task:
             # Processing complete
             if self.processing_complete:
-                print(
-                    f"All processing completed. Result file: {self.result_filename}")
                 return coordinator_pb2.TaskResponse(has_task=False, client_task_status=coordinator_pb2.ClientTaskStatus.COMPLETED)
             # Processing not complete, but no tasks available
             return coordinator_pb2.TaskResponse(has_task=False, client_task_status=coordinator_pb2.ClientTaskStatus.WAIT)
