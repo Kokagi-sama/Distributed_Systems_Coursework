@@ -20,7 +20,6 @@ class Client:
     def __init__(
         self,
         client_id: str,
-        coordinator_address: str,
         coordinator_addresses: list[str],
         fileserver_addresses: list[str],
         cache_dir: str = "./client_cache",
@@ -41,9 +40,7 @@ class Client:
                 try:
                     tmp_file.unlink()
                 except Exception as e:
-                    print(
-                        f"[{client_id}] Warning: Could not remove {tmp_file.name}: {e}"
-                    )
+                    print(f"[{client_id}] Warning: Could not remove {tmp_file.name}: {e}")
 
         # Cache coordinator connections to avoid reopening channels
         self._coord_channels: dict[str, grpc.Channel] = {}
@@ -59,9 +56,7 @@ class Client:
         print(f"[{client_id}] Cache directory: {self.cache_dir}")
         print(f"[{client_id}] File servers: {', '.join(fileserver_addresses)}")
 
-    def _get_coordinator_stub(
-        self, address: str
-    ) -> coordinator_pb2_grpc.CoordinatorStub:
+    def _get_coordinator_stub(self, address: str) -> coordinator_pb2_grpc.CoordinatorStub:
         """Return existing connection to coordinator or open a new one if needed."""
         stub = self._coord_stubs.get(address)
         if stub is not None:
@@ -75,9 +70,9 @@ class Client:
     def _close_coordinator_channels(self) -> None:
         """Close all open coordinator connections."""
         try:
-            for ch in self._coord_channels.values():
+            for channel in self._coord_channels.values():
                 try:
-                    ch.close()
+                    channel.close()
                 except Exception:
                     pass
         finally:
@@ -105,9 +100,7 @@ class Client:
                 sha256.update(chunk)
         return sha256.hexdigest()
 
-    def _stream_upload(
-        self, filepath: Path, remote_filename: str, chunk_size: int = 65536
-    ):
+    def _stream_upload(self, filepath: Path, remote_filename: str, chunk_size: int = 65536):
         """Read local file and generate chunks for upload to file server."""
         file_size = filepath.stat().st_size
 
@@ -169,9 +162,7 @@ class Client:
         last_error = None
         for fileserver_address in servers:
             try:
-                print(
-                    f"[{self.client_id}] Fetching {filename} from {fileserver_address}"
-                )
+                print(f"[{self.client_id}] Fetching {filename} from {fileserver_address}")
                 fileserver_channel = grpc.insecure_channel(fileserver_address)
                 fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
 
@@ -189,16 +180,10 @@ class Client:
                     if computed_checksum != server_checksum:
                         # Delete corrupted file
                         cached_path.unlink()
-                        raise RuntimeError(
-                            f"Checksum verification failed for {filename}: expected {server_checksum}, got {computed_checksum}"
-                        )
-                    print(
-                        f"[{self.client_id}] Successfully verified checksum for {filename}"
-                    )
+                        raise RuntimeError(f"Checksum verification failed for {filename}: expected {server_checksum}, got {computed_checksum}")
+                    print(f"[{self.client_id}] Successfully verified checksum for {filename}")
 
-                print(
-                    f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}"
-                )
+                print(f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}")
                 print(f"[{self.client_id}] Cached {filename} locally")
                 return cached_path
 
@@ -209,9 +194,7 @@ class Client:
                 last_error = e
                 continue
 
-        raise RuntimeError(
-            f"Failed to fetch {filename} from all file servers: {last_error}"
-        )
+        raise RuntimeError(f"Failed to fetch {filename} from all file servers: {last_error}")
 
     def _build_server_rotation_list(self, preferred_address, all_addresses):
         """Build server list starting with preferred address, others in random order."""
@@ -245,33 +228,24 @@ class Client:
         """Follow redirect to new primary server if one was provided."""
         if redirect and redirect != current_addr:
             print(f"[{self.client_id}] Redirecting to primary: {redirect}")
-            servers = self._build_server_rotation_list(
-                redirect, self.fileserver_addresses
-            )
+            servers = self._build_server_rotation_list(redirect, self.fileserver_addresses)
             return servers, 0, servers[0], 1.0
-
         return None, None, None, None
 
-    def _upload_file(
-        self, local_filepath: Path, remote_filename: str, fileserver_address: str
-    ) -> bool:
+    def _upload_file(self, local_filepath: Path, remote_filename: str, fileserver_address: str) -> bool:
         """Upload file to server, retrying until success.
 
         Tries different servers on failure and follows redirects.
         Wait time doubles after each failure up to 30s, resets when switching servers.
         """
-        servers = self._build_server_rotation_list(
-            fileserver_address, self.fileserver_addresses
-        )
+        servers = self._build_server_rotation_list(fileserver_address, self.fileserver_addresses)
         idx = 0
         current_fileserver_address = servers[idx]
         backoff = 1.0
         max_backoff = 30.0
 
         while True:
-            print(
-                f"[{self.client_id}] Uploading {remote_filename} to {current_fileserver_address}"
-            )
+            print(f"[{self.client_id}] Uploading {remote_filename} to {current_fileserver_address}")
             fileserver_channel = None
 
             try:
@@ -281,25 +255,17 @@ class Client:
                 # Create fresh iterator for each attempt
                 chunk_iterator = self._stream_upload(local_filepath, remote_filename)
 
-                response = fileserver_stub.UploadFile(
-                    chunk_iterator, timeout=60.0, wait_for_ready=True
-                )
+                response = fileserver_stub.UploadFile(chunk_iterator, timeout=60.0, wait_for_ready=True)
 
                 if response.success:
-                    print(
-                        f"[{self.client_id}] Successfully uploaded {remote_filename} to {current_fileserver_address}"
-                    )
+                    print(f"[{self.client_id}] Successfully uploaded {remote_filename} to {current_fileserver_address}")
                     return True
 
-                print(
-                    f"[{self.client_id}] Upload to {current_fileserver_address} failed: {response.error_message}"
-                )
+                print(f"[{self.client_id}] Upload to {current_fileserver_address} failed: {response.error_message}")
 
                 # Server may redirect us to the actual primary
                 redirect = getattr(response, "new_primary_fileserver", "")
-                new_servers, new_idx, new_addr, new_backoff = (
-                    self._handle_upload_redirect(redirect, current_fileserver_address)
-                )
+                new_servers, new_idx, new_addr, new_backoff = (self._handle_upload_redirect(redirect, current_fileserver_address))
 
                 if new_servers is not None:
                     servers = new_servers
@@ -308,38 +274,22 @@ class Client:
                     backoff = new_backoff
                 else:
                     backoff = self._apply_backoff(backoff, max_backoff)
-                    idx, current_fileserver_address, reset_backoff = (
-                        self._rotate_to_next_server(
-                            servers, idx, current_fileserver_address
-                        )
-                    )
+                    idx, current_fileserver_address, reset_backoff = (self._rotate_to_next_server(servers, idx, current_fileserver_address))
                     if reset_backoff is not None:
                         backoff = reset_backoff
 
             except grpc.RpcError as e:
                 code = e.code().name if hasattr(e, "code") else "UNKNOWN"
-                print(
-                    f"[{self.client_id}] RPC error to {current_fileserver_address}: {code}, {e}"
-                )
+                print(f"[{self.client_id}] RPC error to {current_fileserver_address}: {code}, {e}")
                 backoff = self._apply_backoff(backoff, max_backoff)
-                idx, current_fileserver_address, reset_backoff = (
-                    self._rotate_to_next_server(
-                        servers, idx, current_fileserver_address
-                    )
-                )
+                idx, current_fileserver_address, reset_backoff = (self._rotate_to_next_server(servers, idx, current_fileserver_address))
                 if reset_backoff is not None:
                     backoff = reset_backoff
 
             except Exception as e:
-                print(
-                    f"[{self.client_id}] Upload error to {current_fileserver_address}: {e}"
-                )
+                print(f"[{self.client_id}] Upload error to {current_fileserver_address}: {e}")
                 backoff = self._apply_backoff(backoff, max_backoff)
-                idx, current_fileserver_address, reset_backoff = (
-                    self._rotate_to_next_server(
-                        servers, idx, current_fileserver_address
-                    )
-                )
+                idx, current_fileserver_address, reset_backoff = (self._rotate_to_next_server(servers, idx, current_fileserver_address))
                 if reset_backoff is not None:
                     backoff = reset_backoff
 
@@ -348,9 +298,7 @@ class Client:
                     if fileserver_channel is not None:
                         fileserver_channel.close()
                 except Exception as e:
-                    print(
-                        f"[{self.client_id}] Failed to close connection to {current_fileserver_address}: {e}"
-                    )
+                    print(f"[{self.client_id}] Failed to close connection to {current_fileserver_address}: {e}")
 
     def process_file(
         self,
@@ -367,9 +315,7 @@ class Client:
             print(f"[{self.client_id}] Error: {e}")
             return False, ""
 
-        print(
-            f"[{self.client_id}] Started processing {filename} from line {start_index} to {end_index - 1}"
-        )
+        print(f"[{self.client_id}] Started processing {filename} from line {start_index} to {end_index - 1}")
 
         # Find and deduplicate primes
         primes = set()
@@ -393,19 +339,13 @@ class Client:
                     if isprime(num):
                         primes.add(num)
                 except ValueError:
-                    print(
-                        f"[{self.client_id}] Warning: Invalid number on line {line_num + 1}: {line}"
-                    )
+                    print(f"[{self.client_id}] Warning: Invalid number on line {line_num + 1}: {line}")
                     continue
 
-        print(
-            f"[{self.client_id}] Finished processing {filename}: found {len(primes):,} unique primes from line {start_index} to {end_index - 1}"
-        )
+        print(f"[{self.client_id}] Finished processing {filename}: found {len(primes):,} unique primes from line {start_index} to {end_index - 1}")
 
         # Write sorted primes atomically
-        result_filename = (
-            f"{Path(filename).stem}_range_{start_index}_{end_index}_primes.txt"
-        )
+        result_filename = (f"{Path(filename).stem}_range_{start_index}_{end_index}_primes.txt")
         result_path = self.cache_dir / result_filename
         tmp_path = Path(str(result_path) + ".tmp")
 
@@ -418,9 +358,7 @@ class Client:
             print(f"[{self.client_id}] Wrote deduplicated primes to {result_filename}")
 
             # Upload result to primary file server
-            success = self._upload_file(
-                result_path, result_filename, primary_fileserver_addr
-            )
+            success = self._upload_file(result_path, result_filename, primary_fileserver_addr)
             return success, result_filename
 
         except Exception as e:
@@ -459,9 +397,7 @@ class Client:
                         if line:
                             primes.add(int(line))
 
-            print(
-                f"[{self.client_id}] Finished merging: {len(primes):,} unique primes total"
-            )
+            print(f"[{self.client_id}] Finished merging: {len(primes):,} unique primes total")
 
             # Write sorted merged result atomically
             with open(tmp_path, "w") as f:
@@ -472,9 +408,7 @@ class Client:
             print(f"[{self.client_id}] Wrote merged result to {merged_filename}")
 
             # Upload result to primary file server
-            success = self._upload_file(
-                merged_path, merged_filename, primary_fileserver_addr
-            )
+            success = self._upload_file(merged_path, merged_filename, primary_fileserver_addr)
             return success, merged_filename
 
         except Exception as e:
@@ -495,9 +429,7 @@ class Client:
                 response = coordinator_stub.SendHeartbeat(request)
 
                 if not response.acknowledged:
-                    print(
-                        f"[{self.client_id}] Warning: Heartbeat not acknowledged by coordinator {address}"
-                    )
+                    print(f"[{self.client_id}] Warning: Heartbeat not acknowledged by coordinator {address}")
 
             except grpc.RpcError as e:
                 print(f"[{self.client_id}] Heartbeat error to {address}: {e}")
@@ -506,10 +438,7 @@ class Client:
 
     def _start_heartbeat(self, address):
         """Start background thread to send heartbeats to coordinator."""
-        if (
-            address in self.heartbeat_threads
-            and self.heartbeat_threads[address].is_alive
-        ):
+        if (address in self.heartbeat_threads and self.heartbeat_threads[address].is_alive):
             return
 
         thread = threading.Thread(
@@ -520,9 +449,7 @@ class Client:
         )
         thread.start()
         self.heartbeat_threads[address] = thread
-        print(
-            f"[{self.client_id}] Started heartbeat to {address} with {self.heartbeat_interval}s interval"
-        )
+        print(f"[{self.client_id}] Started heartbeat to {address} with {self.heartbeat_interval}s interval")
 
     def _stop_heartbeat(self):
         """Stop all heartbeat threads and wait for them to finish."""
@@ -557,9 +484,7 @@ class Client:
 
                 coordinator_stub = self._get_coordinator_stub(current_coordinator)
                 request = coordinator_pb2.TaskRequest(client_id=self.client_id)
-                task = coordinator_stub.RequestTask(
-                    request, timeout=30.0, wait_for_ready=True
-                )
+                task = coordinator_stub.RequestTask(request, timeout=30.0, wait_for_ready=True)
 
                 if not task.has_task:
                     print(f"[{self.client_id}] Stopped: no tasks available")
@@ -567,9 +492,7 @@ class Client:
 
                 if task.client_task_status == coordinator_pb2.WAIT:
                     print(f"[{self.client_id}] Waiting for task dependencies")
-                    current_wait_time = self._apply_backoff(
-                        current_wait_time, max_wait_time
-                    )
+                    current_wait_time = self._apply_backoff(current_wait_time, max_wait_time)
                     continue
 
                 # Got a task, reset backoff
@@ -587,12 +510,8 @@ class Client:
                     print(f"[{self.client_id}] Task details:")
                     print(f"[{self.client_id}]   Task ID: {task.task_id}")
                     print(f"[{self.client_id}]   File: {task.filename}")
-                    print(
-                        f"[{self.client_id}]   Line range: {task.start_index} to {task.end_index - 1}"
-                    )
-                    print(
-                        f"[{self.client_id}]   Primary server: {task.primary_fileserver_addr}"
-                    )
+                    print(f"[{self.client_id}]   Line range: {task.start_index} to {task.end_index - 1}")
+                    print(f"[{self.client_id}]   Primary server: {task.primary_fileserver_addr}")
 
                     success, output_filename = self.process_file(
                         task.filename,
@@ -607,9 +526,7 @@ class Client:
                     print(f"[{self.client_id}]   Task ID: {task.task_id}")
                     print(f"[{self.client_id}]   File 1: {task.file1}")
                     print(f"[{self.client_id}]   File 2: {task.file2}")
-                    print(
-                        f"[{self.client_id}]   Primary server: {task.primary_fileserver_addr}"
-                    )
+                    print(f"[{self.client_id}]   Primary server: {task.primary_fileserver_addr}")
 
                     success, output_filename = self.merge_files(
                         task.file1,
@@ -671,19 +588,12 @@ def main():
     """Entry point for client."""
     parser = argparse.ArgumentParser(description="Distributed prime number client")
     parser.add_argument("client_id", help="Unique client identifier")
-    parser.add_argument("coordinator_address", help="Coordinator address")
-    parser.add_argument(
-        "--coordinators", nargs="+", required=True, help="List of coordinator addresses"
-    )
-    parser.add_argument(
-        "--fileservers", nargs="+", required=True, help="List of file server addresses"
-    )
+    parser.add_argument("--coordinators", nargs="+", required=True, help="List of coordinator addresses")
+    parser.add_argument("--fileservers", nargs="+", required=True, help="List of file server addresses")
 
     args = parser.parse_args()
 
-    client = Client(
-        args.client_id, args.coordinator_address, args.coordinators, args.fileservers
-    )
+    client = Client(args.client_id, args.coordinators, args.fileservers)
     client.run()
 
 
