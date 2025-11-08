@@ -43,10 +43,11 @@ message TaskResponse {
 
 message TaskStatusRequest {
     string client_id = 1;
-    ClientTaskStatus client_task_status = 2;
+    string task_id =2;
+    ClientTaskStatus client_task_status = 3;
     
     // FOR OUTPUT FILE:
-    string output_filename = 3;
+    string output_filename = 4;
 }
 
 message TaskStatusResponse {
