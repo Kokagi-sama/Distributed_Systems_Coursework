@@ -78,9 +78,7 @@ def upload_test_file(test_cache_dir):
 @pytest.fixture
 def client(file_servers, coordinators, test_cache_dir):
     """Standard client instance for tests."""
-    return Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
+    return Client("test-client", coordinators, file_servers, test_cache_dir)
 
 
 def mock_upload_test(
@@ -606,7 +604,6 @@ def test_tmp_cleanup_on_startup(test_cache_dir):
     # Initialize client to trigger cleanup
     Client(
         "test-client",
-        "localhost:50051",
         ["localhost:50051", "localhost:50052"],
         ["localhost:50052"],
         test_cache_dir,
@@ -799,9 +796,7 @@ def test_upload_success_on_first_attempt(client, upload_test_file):
 def test_upload_retries_on_failure(upload_test_file, coordinators, test_cache_dir):
     """Test upload retries with backoff when server returns failure."""
     multi_servers = ["localhost:50052", "localhost:50053"]
-    client = Client(
-        "test-client", "localhost:50051", coordinators, multi_servers, test_cache_dir
-    )
+    client = Client("test-client", coordinators, multi_servers, test_cache_dir)
 
     mocks = mock_upload_test(
         [
@@ -826,9 +821,7 @@ def test_upload_rotates_servers_on_failure(
 ):
     """Test upload rotates through servers after failures."""
     multi_servers = ["localhost:50052", "localhost:50053", "localhost:50054"]
-    client = Client(
-        "test-client", "localhost:50051", coordinators, multi_servers, test_cache_dir
-    )
+    client = Client("test-client", coordinators, multi_servers, test_cache_dir)
 
     mocks = mock_upload_test(
         [
@@ -857,9 +850,7 @@ def test_upload_handles_rpc_error(upload_test_file, coordinators, test_cache_dir
             return grpc.StatusCode.UNAVAILABLE
 
     multi_servers = ["localhost:50052", "localhost:50053"]
-    client = Client(
-        "test-client", "localhost:50051", coordinators, multi_servers, test_cache_dir
-    )
+    client = Client("test-client", coordinators, multi_servers, test_cache_dir)
 
     mocks = mock_upload_test(
         [MockRpcError(), fileserver_pb2.UploadResponse(success=True)]
@@ -879,9 +870,7 @@ def test_upload_handles_generic_exception(
 ):
     """Test upload handles generic exceptions and retries."""
     multi_servers = ["localhost:50052", "localhost:50053"]
-    client = Client(
-        "test-client", "localhost:50051", coordinators, multi_servers, test_cache_dir
-    )
+    client = Client("test-client", coordinators, multi_servers, test_cache_dir)
 
     mocks = mock_upload_test(
         [Exception("network error"), fileserver_pb2.UploadResponse(success=True)]
@@ -902,7 +891,6 @@ def test_upload_backoff_caps_at_30_seconds(
     """Test upload backoff caps at 30 seconds max."""
     client = Client(
         "test-client",
-        "localhost:50051",
         coordinators,
         ["localhost:50052"],
         test_cache_dir,
@@ -939,9 +927,7 @@ def test_upload_resets_backoff_on_server_switch(
 ):
     """Test upload resets backoff when switching to a different server."""
     multi_servers = ["localhost:50052", "localhost:50053"]
-    client = Client(
-        "test-client", "localhost:50051", coordinators, multi_servers, test_cache_dir
-    )
+    client = Client("test-client", coordinators, multi_servers, test_cache_dir)
 
     mocks = mock_upload_test(
         [
@@ -1017,7 +1003,6 @@ def test_heartbeat_to_multiple_coordinators():
     coords = ["localhost:50051", "localhost:50052", "localhost:50053"]
     client = Client(
         "test-client",
-        "localhost:50051",
         coords,
         ["localhost:60001"],
         "/tmp/test_cache",
@@ -1040,7 +1025,6 @@ def test_coordinator_failover_on_rpc_error():
     coords = ["localhost:50051", "localhost:50052"]
     client = Client(
         "test-client",
-        "localhost:50051",
         coords,
         ["localhost:60001"],
         "/tmp/test_cache",

@@ -20,7 +20,6 @@ class Client:
     def __init__(
         self,
         client_id: str,
-        coordinator_address: str,
         coordinator_addresses: list[str],
         fileserver_addresses: list[str],
         cache_dir: str = "./client_cache",
@@ -671,19 +670,12 @@ def main():
     """Entry point for client."""
     parser = argparse.ArgumentParser(description="Distributed prime number client")
     parser.add_argument("client_id", help="Unique client identifier")
-    parser.add_argument("coordinator_address", help="Coordinator address")
-    parser.add_argument(
-        "--coordinators", nargs="+", required=True, help="List of coordinator addresses"
-    )
-    parser.add_argument(
-        "--fileservers", nargs="+", required=True, help="List of file server addresses"
-    )
+    parser.add_argument("--coordinators", nargs="+", required=True, help="List of coordinator addresses")
+    parser.add_argument("--fileservers", nargs="+", required=True, help="List of file server addresses")
 
     args = parser.parse_args()
 
-    client = Client(
-        args.client_id, args.coordinator_address, args.coordinators, args.fileservers
-    )
+    client = Client(args.client_id, args.coordinators, args.fileservers)
     client.run()
 
 
