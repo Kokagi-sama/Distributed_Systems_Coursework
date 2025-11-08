@@ -2,11 +2,20 @@ import grpc
 import sys
 import threading
 import time
+from concurrent import futures
+from pathlib import Path
+import argparse
+import csv
 
-from generated import coordinator_pb2
-from generated import coordinator_pb2_grpc
-from generated import fileserver_pb2
-from generated import fileserver_pb2_grpc
+# Add project root to Python path
+project_root = str(Path(__file__).resolve().parents[1])
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# fmt: off
+from generated import coordinator_pb2 # isort: skip
+from generated import coordinator_pb2_grpc # isort: skip
+# fmt: on
 
 
 class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
@@ -15,16 +24,21 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         self,
         address: str,
         port: int,
-        file_list: str,
+        file_list_path: str,
         client_response_timeout: int = 15,
     ):
         self.address = address  # Server address
         self.port = port  # Server port
         # self.heartbeat_interval = heartbeat_interval  # Heartbeat interval in seconds
-        self.file_list = file_list  # Path to the file containing list of files to process
-        self.lock = threading.Lock()  # Add a lock for thread safety
+        # Path to the file containing list of files to process
+        self.file_list_path = file_list_path
+        self.file_list = []  # List of files to process
+        self.file_size = []  # List of file sizes
+        self.lock = threading.RLock()  # Add a lock for thread safety
         # Time in seconds to wait before considering a client dead
         self.client_response_timeout = client_response_timeout
+
+        self.processing_complete = False  # Flag to indicate if processing is complete
         # State dictionaries to track file processing status
         self.state = {
             "pending_prime": [],
@@ -36,7 +50,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         }
         self.result_filename = ""  # To store the final result filename
 
-        # To track connected clients/workers {client_id: [last_heartbeat_time, assigned_task_id]}
+        # To track connected clients/workers {client_id: [alive_status, last_heartbeat_time, assigned_task_id]}
         self.clients = {}
 
         self.tasks = {}  # To track tasks {task_id: Task object}
@@ -47,6 +61,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         """
         print(f"Initializing Coordinator Server at {self.address}:{self.port}")
         self.load_file_list()
+        self.initialize_files_for_processing()
         print(
             f"Number of files to process: {len(self.state['pending_prime'])}")
 
@@ -59,8 +74,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         with self.lock:
             if client_id not in self.clients:
                 # [alive_status, last_heartbeat_time, assigned_task_id]
-                self.clients[client_id] = [time.time(), 0]
-                print(f"Registered new client: {client_id}")
+                self.clients[client_id] = [True, time.time(), 0]
             else:
                 print(f"Client {client_id} is already registered.")
 
@@ -68,20 +82,72 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
 
     def load_file_list(self):
         """
-        Loads the file list and adds them to the pending_prime state.
+        Loads the file list from a CSV and adds first column to self.file_list and state['pending_prime'],
+        and second column to self.file_size. The CSV is expected to contain filenames in the first column
+        and optional file sizes in the second column.
         """
-        print(f"Loading file list from {self.file_list}")
-        try:
-            # open file
-            with open(self.file_list, 'r') as f:
-                files = f.readlines()
-                # adding all files pending_prime state
-                self.state['pending_prime'] = [file.strip() for file in files]
+        with self.lock:
+            print(f"Loading file list from {self.file_list_path}")
+            try:
+                with open(self.file_list_path, 'r', newline='') as f:
+                    reader = csv.reader(f)
+
+                    first_row = reader.__next__()
+                    # Check if first row is header
+                    if first_row[0].lower() == 'file_name':
+                        pass  # Skip header row
+                    else:
+                        # Process first row
+                        if first_row:
+                            self.file_list.append(first_row[0].strip())
+                            self.file_size.append(int(first_row[1].strip()))
+                    # Process remaining rows
+                    for row in reader:
+                        if not row:
+                            continue  # Skip empty rows
+                        # Get filename
+                        self.file_list.append(row[0].strip())
+                        # Get file size
+                        self.file_size.append(int(row[1].strip()))
+
+                print(f"Read {len(self.file_list)} files.")
+            except Exception as e:
+                print(f"Error loading file list: {e}")
+                sys.exit(1)
+
+    def initialize_files_for_processing(self):
+        """Adds the first list of files to queue for processing divides them based on number of files
+
+        Args:
+            files (list): list of all files
+        """
+
+        # get average numbers per file
+        with self.lock:
+            num_files = max(len(self.file_list), 3)
+            tot_numbers = sum(self.file_size)
+            avg_numbers_per_file = int(
+                tot_numbers / num_files) if num_files > 0 else 0
             print(
-                f"Loaded {len(self.state['pending_prime'])} files for processing.")
-        except Exception as e:
-            print(f"Error loading file list: {e}")
-            sys.exit(1)
+                f"Average numbers per worker: {avg_numbers_per_file}, Total files: {num_files}, Total numbers: {tot_numbers}")
+
+            # Distribute files into pending_prime based on average size
+            for filename, size in zip(self.file_list, self.file_size):
+
+                if size <= avg_numbers_per_file:
+                    self.state['pending_prime'].append((filename, 0, size))
+                else:
+                    size_temp = size
+                    i = 1
+                    while size_temp > avg_numbers_per_file:
+                        self.state['pending_prime'].append(
+                            (filename, size - size_temp, int(avg_numbers_per_file) * i))
+                        size_temp -= avg_numbers_per_file
+                        i += 1
+                    if size_temp > 0:
+                        self.state['pending_prime'].append(
+                            (filename, size - size_temp, int(size)))
+            print(self.state['pending_prime'])
 
     def check_processing_complete(self):
         """Checks if all processing is completed
@@ -94,7 +160,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
                     not self.state['in_progress_prime'] and
                     not self.state['in_progress_de_duplication'] and
                     len(self.state['pending_de_duplication']) == 1):
-
+                self.processing_complete = True
                 return True
             return False
 
@@ -120,9 +186,6 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
             elif len(self.state['pending_de_duplication']) == 1:
                 if (self.check_processing_complete()):
                     self.result_filename = self.state['pending_de_duplication'][0]
-                    # Print final result
-                    print(
-                        f"All processing completed. Result file: {self.result_filename}")
                     return None
             else:
                 return None  # No tasks available
@@ -147,7 +210,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
             if task:
                 print(f"Assigning task {task.task_id} to client {client_id}")
                 # Update assigned task ID in the clients dictionary
-                self.clients[client_id][1] = task.task_id
+                self.clients[client_id][2] = task.task_id
                 # Update state to reflect in-progress task
                 if task.task_type == 0:
                     self.state['in_progress_prime'].append(task.task_files[0])
@@ -171,7 +234,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
             new_file (str): name of the new file returned by the client
         """
         with self.lock:
-            task = self.tasks.get(task_id)
+            task = self.tasks.get(int(task_id))
             if not task:
                 print(f"Task {task_id} not found.")
                 return
@@ -198,15 +261,24 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
 
                 # Add new returned file to pending de-duplication
                 self.state['pending_de_duplication'].append(new_file)
+            self.clients[client_id][2] = 0  # Clear assigned task ID
 
     def start_heartbeat(self):
         pass
 
     def check_dead_clients_reassign_tasks(self):
-        for client_id, (last_heartbeat, assigned_task_id) in self.clients.items():
-            if time.time() - last_heartbeat > self.client_response_timeout:
+        for client_id, (alive_status, last_heartbeat, assigned_task_id) in self.clients.items():
+            if ((time.time() - last_heartbeat > self.client_response_timeout) and alive_status):
+                # Mark client as dead
+                self.clients[client_id][0] = False
+                # Log dead client
+                now = time.time()
+                last_time = time.strftime(
+                    '%Y-%m-%d %H:%M:%S', time.localtime(last_heartbeat))
+                now_time = time.strftime(
+                    '%Y-%m-%d %H:%M:%S', time.localtime(now))
                 print(
-                    f"Client {client_id} is considered dead. Last heartbeat at {last_heartbeat}, current time {time.time()}")
+                    f"Client {client_id} is considered dead. Last heartbeat at {last_time} (ts={last_heartbeat}), current time {now_time} (ts={now})")
                 # Reassign the task if there was an assigned task
                 if assigned_task_id:
                     self.reassign_task(assigned_task_id)
@@ -223,75 +295,100 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
                 # For prime task
                 if task.task_files[0] in self.state['in_progress_prime']:
 
+                    self.state['in_progress_prime'].remove(
+                        task.task_files[0])  # Remove from in-progress
                     self.state['pending_prime'].append(
-                        self.state['in_progress_prime'].pop(
-                            task.task_files[0]))  # Remove from in-progress and add back to pending
+                        task.task_files[0])  # Add back to pending
             else:
                 # For de-duplication task
                 for file in task.task_files:
                     if file in self.state['in_progress_de_duplication']:
+                        self.state['in_progress_de_duplication'].remove(
+                            file)  # Remove from in-progress
                         self.state['pending_de_duplication'].append(
-                            self.state['in_progress_de_duplication'].pop(file))  # Remove from in-progress and add back to pending
+                            file)  # Add back to pending
 
     def update_heartbeat(self, client_id: str):
         with self.lock:
-            if client_id in self.clients:
+            if (client_id in self.clients):
                 # Update last heartbeat time
-                self.clients[client_id][0] = time.time()
+                self.clients[client_id][1] = time.time()
+                self.clients[client_id][0] = True  # Mark as alive
+                print(f"Heartbeat received from client {client_id}")
 
     # RPC Methods
 
     def RequestTask(self, request, context):
         client_id = request.client_id
+        print(f"Client {client_id} is requesting a task.")
         self.register_client(client_id)
-
+        print(f"Registered client {client_id} for task request.")
         task = self.assign_task(client_id)
-
+        # No task available
         if not task:
-            # No task available
-            return coordinator_pb2.TaskResponse(has_task=False)
+            # Processing complete
+            if self.processing_complete:
+                print(
+                    f"All processing completed. Result file: {self.result_filename}")
+                return coordinator_pb2.TaskResponse(has_task=False, client_task_status=coordinator_pb2.ClientTaskStatus.COMPLETED)
+            # Processing not complete, but no tasks available
+            return coordinator_pb2.TaskResponse(has_task=False, client_task_status=coordinator_pb2.ClientTaskStatus.WAIT)
 
         if task.task_type == 0:  # FIND_PRIMES
             return coordinator_pb2.TaskResponse(
                 has_task=True,
-                task_type=coordinator_pb2.FIND_PRIMES,
-                primary_fileserver_addr=self.primary_fileserver_addr,
-                filename=task.task_files[0],
+                task_type=coordinator_pb2.TaskType.FIND_PRIMES,
+                filename=task.task_files[0][0],
+                start_index=task.task_files[0][1],
+                end_index=task.task_files[0][2],
+
                 task_id=str(task.task_id)
             )
         elif task.task_type == 1:  # MERGE
             return coordinator_pb2.TaskResponse(
                 has_task=True,
-                task_type=coordinator_pb2.MERGE,
-                primary_fileserver_addr=self.primary_fileserver_addr,
+                task_type=coordinator_pb2.TaskType.MERGE,
                 task_id=str(task.task_id),
                 file1=task.task_files[0],
                 file2=task.task_files[1]
             )
 
-        # Should not be reached
+        # Just in case lol
         return coordinator_pb2.TaskResponse(has_task=False)
 
-    def CompleteTask(self, request, context):
+    def UpdateTaskStatus(self, request, context):
         client_id = request.client_id
         task_id = request.task_id
-        new_file = request.new_file
+        output_filename = request.output_filename
 
-        self.complete_task(task_id, client_id, new_file)
+        self.complete_task(task_id, client_id, output_filename)
 
-        return coordinator_pb2.TaskCompletionResponse(acknowledged=True)
-
-    # Not doing anything for heartbeat for now just responding acknowledged
+        return coordinator_pb2.TaskStatusResponse(acknowledged=True)
 
     def SendHeartbeat(self, request, context):
         client_id = request.client_id
         self.update_heartbeat(client_id)
         return coordinator_pb2.HeartbeatResponse(acknowledged=True)
 
+    def serve(self):
+        server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+        coordinator_pb2_grpc.add_CoordinatorServicer_to_server(
+            self, server)
+        server.add_insecure_port(f"{self.address}:{self.port}")
+        server.start()
+        print(f"Coordinator Server started at {self.address}:{self.port}")
+        try:
+            while True:
+                time.sleep(10)
+                self.check_dead_clients_reassign_tasks()
+        except KeyboardInterrupt:
+            print("Shutting down Coordinator Server...")
+            server.stop(0)
+
 
 class Task:
 
-    task_id_static = 1  # Starts from 1, increments with each new task
+    task_id_static = 0  # Starts from 0, increments with each new task
 
     def __init__(self, client_id: str, task_type: str, task_files: list, task_status: int = 0):
         self.task_id = Task.task_id_static + 1
@@ -306,19 +403,30 @@ class Task:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Coordinator server CLI")
+    parser.add_argument("--address", "-a",
+                        default="localhost", help="Server address")
+    parser.add_argument("--port", "-p", type=int,
+                        default=50051, help="Server port")
+    parser.add_argument("--file-list", "-f",
+                        default="file_list.csv", help="Path to the file list")
+    parser.add_argument("--timeout", "-t", type=int, default=30,
+                        help="Client response timeout (seconds)")
+    args = parser.parse_args()
 
-    print("Coordinator Server is running...")
-    # Example of creating a Task object
-    task = Task(client_id="worker-1", task_type="prime",
-                task_files=["file1.txt", "file2.txt"])
-    print(
-        f"Created task {task.task_id} for client {task.client_id} of type {task.task_type}")
+    file_path = Path(args.file_list)
+    if not file_path.exists():
+        print(f"File list not found: {file_path}")
+        sys.exit(1)
 
-    print(Task.task_id_s)
-
-    # start sever
-
-    # check dead client
+    coordinator_server = CoordinatorServer(
+        address=args.address,
+        port=args.port,
+        file_list_path=str(file_path),
+        client_response_timeout=args.timeout,
+    )
+    coordinator_server.initialize()
+    coordinator_server.serve()
 
 
 if __name__ == "__main__":
