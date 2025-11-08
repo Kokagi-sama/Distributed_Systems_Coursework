@@ -188,12 +188,10 @@ class Client:
                 return cached_path
 
             except Exception as e:
-                print(
-                    f"[{self.client_id}] Failed to fetch from {fileserver_address}: {e}"
-                )
+                print(f"[{self.client_id}] Failed to fetch from {fileserver_address}: {e}")
                 last_error = e
                 continue
-
+            
         raise RuntimeError(f"Failed to fetch {filename} from all file servers: {last_error}")
 
     def _build_server_rotation_list(self, preferred_address, all_addresses):
@@ -224,11 +222,11 @@ class Client:
         time.sleep(sleep_seconds)
         return min(max_backoff, current_backoff * 2)
 
-    def _handle_upload_redirect(self, redirect, current_addr):
+    def _handle_upload_redirect(self, redirect_address, current_addr):
         """Follow redirect to new primary server if one was provided."""
-        if redirect and redirect != current_addr:
-            print(f"[{self.client_id}] Redirecting to primary: {redirect}")
-            servers = self._build_server_rotation_list(redirect, self.fileserver_addresses)
+        if redirect_address and redirect_address != current_addr:
+            print(f"[{self.client_id}] Redirecting to primary: {redirect_address}")
+            servers = self._build_server_rotation_list(redirect_address, self.fileserver_addresses)
             return servers, 0, servers[0], 1.0
         return None, None, None, None
 
@@ -264,8 +262,8 @@ class Client:
                 print(f"[{self.client_id}] Upload to {current_fileserver_address} failed: {response.error_message}")
 
                 # Server may redirect us to the actual primary
-                redirect = getattr(response, "new_primary_fileserver", "")
-                new_servers, new_idx, new_addr, new_backoff = (self._handle_upload_redirect(redirect, current_fileserver_address))
+                redirect_address = response.new_primary_fileserver
+                new_servers, new_idx, new_addr, new_backoff = (self._handle_upload_redirect(redirect_address, current_fileserver_address))
 
                 if new_servers is not None:
                     servers = new_servers
@@ -511,11 +509,11 @@ class Client:
                     print(f"[{self.client_id}]   Task ID: {task.task_id}")
                     print(f"[{self.client_id}]   File: {task.filename}")
                     print(f"[{self.client_id}]   Line range: {task.start_index} to {task.end_index - 1}")
-                    print(f"[{self.client_id}]   Primary server: {task.primary_fileserver_addr}")
+                    print(f"[{self.client_id}]   Primary server: {self.fileserver_addresses[0]}")
 
                     success, output_filename = self.process_file(
                         task.filename,
-                        task.primary_fileserver_addr,
+                        self.fileserver_addresses[0],
                         task.start_index,
                         task.end_index,
                     )
@@ -526,13 +524,13 @@ class Client:
                     print(f"[{self.client_id}]   Task ID: {task.task_id}")
                     print(f"[{self.client_id}]   File 1: {task.file1}")
                     print(f"[{self.client_id}]   File 2: {task.file2}")
-                    print(f"[{self.client_id}]   Primary server: {task.primary_fileserver_addr}")
+                    print(f"[{self.client_id}]   Primary server: {self.fileserver_addresses[0]}")
 
                     success, output_filename = self.merge_files(
                         task.file1,
                         task.file2,
                         task.task_id,
-                        task.primary_fileserver_addr,
+                        self.fileserver_addresses[0],
                     )
                     task_id = task.task_id
 
