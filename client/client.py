@@ -219,22 +219,51 @@ class Client:
             f"Failed to fetch {filename} from all file servers: {last_error}"
         )
 
+    def _rotate_to_next_server(self, servers, current_idx, current_addr):
+        """Switch to next server in rotation and reset backoff if server changed."""
+        next_idx = (current_idx + 1) % len(servers)
+        next_addr = servers[next_idx]
+
+        if next_addr != current_addr:
+            print(f"[{self.client_id}] Switching to next fileserver: {next_addr}")
+            return next_idx, next_addr, 1.0
+
+        return next_idx, next_addr, None
+
+    def _apply_backoff(self, current_backoff, max_backoff=30.0):
+        """Wait before retry with exponential backoff and jitter."""
+        sleep_seconds = current_backoff + random.uniform(0, 0.5)
+        print(f"[{self.client_id}] Retry in {sleep_seconds:.1f}s...")
+        time.sleep(sleep_seconds)
+        return min(max_backoff, current_backoff * 2)
+
+    def _handle_upload_redirect(self, redirect, current_addr):
+        """Build new server list with redirect as primary if provided."""
+        if redirect and redirect != current_addr:
+            print(f"[{self.client_id}] Redirecting to primary: {redirect}")
+            others = [addr for addr in self.fileserver_addresses if addr != redirect]
+            random.shuffle(others)
+            servers = [redirect] + others if others else [redirect]
+            return servers, 0, servers[0], 1.0
+
+        return None, None, None, None
+
     def _upload_file(
         self, local_filepath: Path, remote_filename: str, fileserver_address: str
     ) -> bool:
-        """Upload file to file server.
+        """Upload file with retry on failure.
 
-        On failure, rotate through 'self.fileserver_addresses' in order to try a different file server. If the server responds with a redirect to a new primary, immediately switch to that address and reset backoff and rotation.
+        Retries indefinitely with exponential backoff (capped at 30s).
+        Rotates through available file servers on each failure.
+        Follows redirects to new primary servers when provided.
         """
-
-        # Build rotation list: start with the provided address, then others in random order
+        # Start with provided address, then shuffle others for failover
         others = [
             addr for addr in self.fileserver_addresses if addr != fileserver_address
         ]
         random.shuffle(others)
         servers = [fileserver_address] + others if others else [fileserver_address]
         idx = 0
-
         current_fileserver_address = servers[idx]
         backoff = 1.0
         max_backoff = 30.0
@@ -246,14 +275,12 @@ class Client:
             fileserver_channel = None
 
             try:
-                # Connect to file server
                 fileserver_channel = grpc.insecure_channel(current_fileserver_address)
                 fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
 
-                # Fresh iterator each attempt; generators cannot be reused
+                # Create fresh iterator for each attempt
                 chunk_iterator = self._stream_upload(local_filepath, remote_filename)
 
-                # Timeout to avoid hanging; wait_for_ready tolerates brief unavailability
                 response = fileserver_stub.UploadFile(
                     chunk_iterator, timeout=60.0, wait_for_ready=True
                 )
@@ -268,78 +295,53 @@ class Client:
                     f"[{self.client_id}] Upload to {current_fileserver_address} failed: {response.error_message}"
                 )
 
-                # Follow redirect if provided and different
+                # Check for redirect to new primary
                 redirect = getattr(response, "new_primary_fileserver", "")
-                if redirect and redirect != current_fileserver_address:
-                    print(f"[{self.client_id}] Redirecting to primary: {redirect}")
-                    # Reset rotation to prioritize the redirected address; randomize the rest
-                    others = [
-                        addr for addr in self.fileserver_addresses if addr != redirect
-                    ]
-                    random.shuffle(others)
-                    servers = [redirect] + others if others else [redirect]
-                    idx = 0
-                    current_fileserver_address = servers[idx]
-                    backoff = 1.0  # reset after redirect
-                else:
-                    # Exponential backoff with jitter
-                    sleep_seconds = backoff + random.uniform(0, 0.5)
-                    print(f"[{self.client_id}] Retry in {sleep_seconds:.1f}s...")
-                    time.sleep(sleep_seconds)
-                    backoff = min(max_backoff, backoff * 2)
+                new_servers, new_idx, new_addr, new_backoff = (
+                    self._handle_upload_redirect(redirect, current_fileserver_address)
+                )
 
-                    # Rotate to the next fileserver for the next attempt
-                    prev_addr = current_fileserver_address
-                    idx = (idx + 1) % len(servers)
-                    current_fileserver_address = servers[idx]
-                    if current_fileserver_address != prev_addr:
-                        print(
-                            f"[{self.client_id}] Switching to next fileserver: {current_fileserver_address}"
+                if new_servers is not None:
+                    servers = new_servers
+                    idx = new_idx
+                    current_fileserver_address = new_addr
+                    backoff = new_backoff
+                else:
+                    backoff = self._apply_backoff(backoff, max_backoff)
+                    idx, current_fileserver_address, reset_backoff = (
+                        self._rotate_to_next_server(
+                            servers, idx, current_fileserver_address
                         )
-                        backoff = 1.0  # reset when switching servers
-                    continue
+                    )
+                    if reset_backoff is not None:
+                        backoff = reset_backoff
 
             except grpc.RpcError as e:
                 code = e.code().name if hasattr(e, "code") else "UNKNOWN"
                 print(
                     f"[{self.client_id}] RPC error to {current_fileserver_address}: {code} - {e}"
                 )
-
-                # Backoff, then rotate to a different server on RPC errors as well
-                sleep_seconds = backoff + random.uniform(0, 0.5)
-                print(f"[{self.client_id}] Retry in {sleep_seconds:.1f}s...")
-                time.sleep(sleep_seconds)
-                backoff = min(max_backoff, backoff * 2)
-
-                prev_addr = current_fileserver_address
-                idx = (idx + 1) % len(servers)
-                current_fileserver_address = servers[idx]
-                if current_fileserver_address != prev_addr:
-                    print(
-                        f"[{self.client_id}] Switching to next fileserver after RPC error: {current_fileserver_address}"
+                backoff = self._apply_backoff(backoff, max_backoff)
+                idx, current_fileserver_address, reset_backoff = (
+                    self._rotate_to_next_server(
+                        servers, idx, current_fileserver_address
                     )
-                    backoff = 1.0
-                continue
+                )
+                if reset_backoff is not None:
+                    backoff = reset_backoff
 
             except Exception as e:
                 print(
                     f"[{self.client_id}] Upload to {current_fileserver_address} error: {e}"
                 )
-                sleep_seconds = backoff + random.uniform(0, 0.5)
-                print(f"[{self.client_id}] Retry in {sleep_seconds:.1f}s...")
-                time.sleep(sleep_seconds)
-                backoff = min(max_backoff, backoff * 2)
-
-                # Rotate to the next fileserver for the next attempt
-                prev_addr = current_fileserver_address
-                idx = (idx + 1) % len(servers)
-                current_fileserver_address = servers[idx]
-                if current_fileserver_address != prev_addr:
-                    print(
-                        f"[{self.client_id}] Switching to next fileserver: {current_fileserver_address}"
+                backoff = self._apply_backoff(backoff, max_backoff)
+                idx, current_fileserver_address, reset_backoff = (
+                    self._rotate_to_next_server(
+                        servers, idx, current_fileserver_address
                     )
-                    backoff = 1.0
-                continue
+                )
+                if reset_backoff is not None:
+                    backoff = reset_backoff
 
             finally:
                 try:

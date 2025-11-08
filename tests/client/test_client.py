@@ -1,8 +1,10 @@
 import hashlib
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
+import grpc
 import pytest
 
 from client.client import Client
@@ -64,20 +66,119 @@ def create_fetch_chunks(filename, file_content, checksum=None):
     )
 
 
-def test_client_initialization(file_servers, coordinators, test_cache_dir):
-    """Test client initializes correctly."""
-    client = Client(
+@pytest.fixture
+def upload_test_file(test_cache_dir):
+    """Test file for upload tests."""
+    local_file = Path(test_cache_dir) / "upload_test.txt"
+    local_file.parent.mkdir(parents=True, exist_ok=True)
+    local_file.write_text("test content\n")
+    return local_file
+
+
+@pytest.fixture
+def client(file_servers, coordinators, test_cache_dir):
+    """Standard client instance for tests."""
+    return Client(
         "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
     )
+
+
+def mock_upload_test(
+    stub_responses, jitter=0.0, track_sleep=False, track_connections=False
+):
+    """Setup mocks for upload tests."""
+    stub = MagicMock()
+    stub.UploadFile.side_effect = stub_responses
+
+    num_calls = len(stub_responses)
+    channels = [MagicMock() for _ in range(num_calls)]
+
+    result = {
+        "stub": stub,
+        "channels": channels,
+    }
+
+    if track_sleep:
+        result["slept"] = []
+
+    if track_connections:
+        result["connected_servers"] = []
+
+    patches = ExitStack()
+    patches.enter_context(patch("random.shuffle", lambda lst: None))
+
+    if track_connections:
+
+        def track_connection(addr):
+            result["connected_servers"].append(addr)
+            return channels[len(result["connected_servers"]) - 1]
+
+        patches.enter_context(
+            patch("grpc.insecure_channel", side_effect=track_connection)
+        )
+    else:
+        patches.enter_context(patch("grpc.insecure_channel", side_effect=channels))
+
+    patches.enter_context(
+        patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub)
+    )
+    patches.enter_context(patch("random.uniform", return_value=jitter))
+
+    if track_sleep:
+        patches.enter_context(
+            patch("time.sleep", side_effect=lambda s: result["slept"].append(s))
+        )
+    else:
+        patches.enter_context(patch("time.sleep"))
+
+    result["patches"] = patches
+    return result
+
+
+def mock_fileserver(fetch_file=None, upload_success=True):
+    """Setup mock fileserver for fetch/process/merge tests."""
+    stub = MagicMock()
+    result = {"stub": stub}
+
+    if fetch_file:
+        filename = fetch_file.get("filename", "test.txt")
+        content = fetch_file.get("content", b"")
+        checksum = fetch_file.get("checksum")
+        stub.FetchFile.return_value = create_fetch_chunks(filename, content, checksum)
+
+    if upload_success:
+        capture_upload, uploaded_data = create_upload_capturer()
+        stub.UploadFile.side_effect = capture_upload
+        result["uploaded_data"] = uploaded_data
+
+    channel = MagicMock()
+    patches = ExitStack()
+    patches.enter_context(patch("grpc.insecure_channel", return_value=channel))
+    patches.enter_context(
+        patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub)
+    )
+
+    result["channel"] = channel
+    result["patches"] = patches
+    return result
+
+
+def mock_coordinator_stub(client, method_name, response):
+    """Mock a coordinator stub method."""
+    mock_stub = Mock()
+    setattr(mock_stub, method_name, Mock(return_value=response))
+    client._get_coordinator_stub = Mock(return_value=mock_stub)
+    return mock_stub
+
+
+def test_client_initialization(client):
+    """Test client initializes correctly."""
     assert client.client_id == "test-client"
     assert client.cache_dir.exists()
 
 
-def test_process_file(temp_test_file, file_servers, coordinators, test_cache_dir):
+def test_process_file(client, temp_test_file):
     """Test processing full file."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
 
     file_content = temp_test_file.read_bytes()
     capture_upload, uploaded_data = create_upload_capturer()
@@ -120,13 +221,10 @@ def test_process_file(temp_test_file, file_servers, coordinators, test_cache_dir
     assert mock_stub.UploadFile.call_count == 1
 
 
-def test_request_task_with_mock(file_servers, coordinators, test_cache_dir):
+def test_request_task_with_mock(client):
     """Test RequestTask RPC with mock coordinator."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
 
-    mock_response = coordinator_pb2.TaskResponse(
+    response = coordinator_pb2.TaskResponse(
         has_task=True,
         task_type=coordinator_pb2.FIND_PRIMES,
         task_id="task_1",
@@ -136,55 +234,35 @@ def test_request_task_with_mock(file_servers, coordinators, test_cache_dir):
         client_task_status=coordinator_pb2.COMPLETED,
     )
 
-    # Mock _get_coordinator_stub to return a mock stub
-    mock_stub = Mock()
-    mock_stub.RequestTask = Mock(return_value=mock_response)
-    client._get_coordinator_stub = Mock(return_value=mock_stub)
-
-    request = coordinator_pb2.TaskRequest(client_id=client.client_id)
-    task = mock_stub.RequestTask(request)
+    stub = mock_coordinator_stub(client, "RequestTask", response)
+    task = stub.RequestTask(coordinator_pb2.TaskRequest(client_id=client.client_id))
 
     assert task.has_task is True
     assert task.task_type == coordinator_pb2.FIND_PRIMES
     assert task.filename == "test.txt"
 
 
-def test_update_task_status_with_mock(file_servers, coordinators, test_cache_dir):
+def test_update_task_status_with_mock(client):
     """Test UpdateTaskStatus RPC with mock coordinator."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
 
-    mock_response = coordinator_pb2.TaskStatusResponse(acknowledged=True)
+    response = coordinator_pb2.TaskStatusResponse(acknowledged=True)
+    stub = mock_coordinator_stub(client, "UpdateTaskStatus", response)
 
-    # Mock _get_coordinator_stub to return a mock stub
-    mock_stub = Mock()
-    mock_stub.UpdateTaskStatus = Mock(return_value=mock_response)
-    client._get_coordinator_stub = Mock(return_value=mock_stub)
-
-    status_request = coordinator_pb2.TaskStatusRequest(
+    request = coordinator_pb2.TaskStatusRequest(
         client_id=client.client_id,
         task_id="task_1",
         client_task_status=coordinator_pb2.COMPLETED,
         output_filename="output.txt",
     )
-    response = mock_stub.UpdateTaskStatus(status_request)
+    result = stub.UpdateTaskStatus(request)
 
-    assert response.acknowledged is True
+    assert result.acknowledged is True
 
 
-def test_no_task_available(file_servers, coordinators, test_cache_dir):
+def test_no_task_available(client):
     """Test handling when coordinator has no tasks."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
-    mock_response = coordinator_pb2.TaskResponse(has_task=False)
-
-    # Mock _get_coordinator_stub to return a mock stub
-    mock_stub = Mock()
-    mock_stub.RequestTask = Mock(return_value=mock_response)
-    client._get_coordinator_stub = Mock(return_value=mock_stub)
+    response = coordinator_pb2.TaskResponse(has_task=False)
+    mock_stub = mock_coordinator_stub(client, "RequestTask", response)
 
     request = coordinator_pb2.TaskRequest(client_id=client.client_id)
     task = mock_stub.RequestTask(request)
@@ -192,20 +270,12 @@ def test_no_task_available(file_servers, coordinators, test_cache_dir):
     assert task.has_task is False
 
 
-def test_wait_for_dependencies(file_servers, coordinators, test_cache_dir):
+def test_wait_for_dependencies(client):
     """Test handling when coordinator returns WAIT status."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
-    mock_response = coordinator_pb2.TaskResponse(
+    response = coordinator_pb2.TaskResponse(
         has_task=True, client_task_status=coordinator_pb2.WAIT
     )
-
-    # Mock _get_coordinator_stub to return a mock stub
-    mock_stub = Mock()
-    mock_stub.RequestTask = Mock(return_value=mock_response)
-    client._get_coordinator_stub = Mock(return_value=mock_stub)
+    mock_stub = mock_coordinator_stub(client, "RequestTask", response)
 
     request = coordinator_pb2.TaskRequest(client_id=client.client_id)
     task = mock_stub.RequestTask(request)
@@ -214,11 +284,8 @@ def test_wait_for_dependencies(file_servers, coordinators, test_cache_dir):
     assert task.client_task_status == coordinator_pb2.WAIT
 
 
-def test_exponential_backoff_on_wait(file_servers, coordinators, test_cache_dir):
+def test_exponential_backoff_on_wait(client):
     """Test exponential backoff when waiting for dependencies."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
 
     wait_response = coordinator_pb2.TaskResponse(
         has_task=True, client_task_status=coordinator_pb2.WAIT
@@ -274,90 +341,50 @@ def test_exponential_backoff_on_wait(file_servers, coordinators, test_cache_dir)
     assert client.process_file.call_count == 1
 
 
-def test_heartbeat_with_mock(file_servers, coordinators, test_cache_dir):
+def test_heartbeat_with_mock(client):
     """Test SendHeartbeat RPC with mock coordinator."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
-    mock_response = coordinator_pb2.HeartbeatResponse(acknowledged=True)
-
-    # Mock _get_coordinator_stub to return a mock stub
-    mock_stub = Mock()
-    mock_stub.SendHeartbeat = Mock(return_value=mock_response)
-    client._get_coordinator_stub = Mock(return_value=mock_stub)
+    response = coordinator_pb2.HeartbeatResponse(acknowledged=True)
+    stub = mock_coordinator_stub(client, "SendHeartbeat", response)
 
     request = coordinator_pb2.HeartbeatRequest(client_id=client.client_id)
-    response = mock_stub.SendHeartbeat(request)
+    result = stub.SendHeartbeat(request)
 
-    assert response.acknowledged is True
+    assert result.acknowledged is True
 
 
-def test_fetch_file_with_mock(file_servers, coordinators, test_cache_dir):
+def test_fetch_file_with_mock(client):
     """Test file fetching with mock file server."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
+    file_content = b"17\n19\n23\n29\n31\n"
+    mocks = mock_fileserver(
+        fetch_file={"filename": "test.txt", "content": file_content},
+        upload_success=False,
     )
 
-    file_content = b"17\n19\n23\n29\n31\n"
-    fetch_chunks = [
-        fileserver_pb2.FileChunk(
-            metadata=fileserver_pb2.FileMetadata(
-                filename="test.txt", file_size=len(file_content)
-            )
-        ),
-        fileserver_pb2.FileChunk(chunk_data=file_content),
-    ]
-    mock_stub = MagicMock()
-    mock_stub.FetchFile.return_value = iter(fetch_chunks)
-
-    with patch("grpc.insecure_channel"):
-        with patch(
-            "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
-        ):
-            filepath = client._fetch_file("test.txt")
+    with mocks["patches"]:
+        filepath = client._fetch_file("test.txt")
 
     assert filepath.exists()
     assert filepath.read_bytes() == file_content
 
 
-def test_fetch_file_from_cache(file_servers, coordinators, test_cache_dir):
+def test_fetch_file_from_cache(client):
     """Test file is served from cache on second request."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
+    file_content = b"2\n3\n5\n7\n"
+    mocks = mock_fileserver(
+        fetch_file={"filename": "test.txt", "content": file_content},
+        upload_success=False,
     )
 
-    file_content = b"2\n3\n5\n7\n"
-    fetch_chunks = [
-        fileserver_pb2.FileChunk(
-            metadata=fileserver_pb2.FileMetadata(
-                filename="test.txt", file_size=len(file_content)
-            )
-        ),
-        fileserver_pb2.FileChunk(chunk_data=file_content),
-    ]
-    mock_stub = MagicMock()
-    mock_stub.FetchFile.return_value = iter(fetch_chunks)
-
-    with patch("grpc.insecure_channel"):
-        with patch(
-            "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
-        ):
-            filepath1 = client._fetch_file("test.txt")
-            filepath2 = client._fetch_file("test.txt")
+    with mocks["patches"]:
+        filepath1 = client._fetch_file("test.txt")
+        filepath2 = client._fetch_file("test.txt")
 
     assert filepath1 == filepath2
-    assert mock_stub.FetchFile.call_count == 1
+    assert mocks["stub"].FetchFile.call_count == 1
 
 
-def test_process_file_partial_range(
-    temp_test_file, file_servers, coordinators, test_cache_dir
-):
+def test_process_file_partial_range(client, temp_test_file):
     """Test processing partial line range."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
     file_content = temp_test_file.read_bytes()
     capture_upload, uploaded_data = create_upload_capturer()
 
@@ -395,12 +422,8 @@ def test_process_file_partial_range(
     assert mock_stub.UploadFile.call_count == 1
 
 
-def test_merge_files(file_servers, coordinators, test_cache_dir):
+def test_merge_files(client):
     """Test merging two prime files."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
     capture_upload, uploaded_data = create_upload_capturer()
 
     file1_content = b"2\n3\n5\n7\n"
@@ -448,14 +471,8 @@ def test_merge_files(file_servers, coordinators, test_cache_dir):
     assert mock_stub.UploadFile.call_count == 1
 
 
-def test_upload_includes_checksum(
-    temp_test_file, file_servers, coordinators, test_cache_dir
-):
+def test_upload_includes_checksum(client, temp_test_file):
     """Test that upload includes checksum."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
     file_content = temp_test_file.read_bytes()
     capture_upload, uploaded_data = create_upload_capturer()
 
@@ -495,14 +512,8 @@ def test_upload_includes_checksum(
     assert len(metadata.checksum) == 64  # SHA-256 produces 64 hex chars
 
 
-def test_fetch_verifies_checksum(
-    temp_test_file, file_servers, coordinators, test_cache_dir
-):
+def test_fetch_verifies_checksum(client, temp_test_file):
     """Test that fetch verifies checksum from file server."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
     file_content = temp_test_file.read_bytes()
 
     # Compute correct checksum
@@ -526,14 +537,8 @@ def test_fetch_verifies_checksum(
     assert cached_path.read_bytes() == file_content
 
 
-def test_fetch_failover_on_server_error(
-    temp_test_file, file_servers, coordinators, test_cache_dir
-):
+def test_fetch_failover_on_server_error(client, temp_test_file):
     """Test that fetch fails over to next server when first server fails."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
     file_content = temp_test_file.read_bytes()
 
     # Compute correct checksum
@@ -559,14 +564,8 @@ def test_fetch_failover_on_server_error(
     assert mock_stub.FetchFile.call_count == 2
 
 
-def test_fetch_detects_checksum_mismatch(
-    temp_test_file, file_servers, coordinators, test_cache_dir
-):
+def test_fetch_detects_checksum_mismatch(client, temp_test_file):
     """Test that fetch detects checksum mismatch and raises error."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
     file_content = temp_test_file.read_bytes()
 
     # Use wrong checksum
@@ -617,14 +616,8 @@ def test_tmp_cleanup_on_startup(test_cache_dir):
     assert not tmp2.exists()
 
 
-def test_no_tmp_files_after_successful_fetch(
-    file_servers, coordinators, test_cache_dir
-):
+def test_no_tmp_files_after_successful_fetch(client, test_cache_dir):
     """Test that .tmp files are removed after successful fetch."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
     file_content = b"2\n3\n5\n7\n"
     checksum = hashlib.sha256(file_content).hexdigest()
 
@@ -655,14 +648,8 @@ def test_no_tmp_files_after_successful_fetch(
     assert len(tmp_files) == 0
 
 
-def test_files_persist_after_upload(
-    temp_test_file, file_servers, coordinators, test_cache_dir
-):
+def test_files_persist_after_upload(client, temp_test_file, test_cache_dir):
     """Test that result files stay on disk after successful upload."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
     file_content = temp_test_file.read_bytes()
     capture_upload, _ = create_upload_capturer()
 
@@ -705,14 +692,8 @@ def test_files_persist_after_upload(
     assert len(tmp_files) == 0
 
 
-def test_process_file_cleans_tmp_on_error(
-    temp_test_file, file_servers, coordinators, test_cache_dir
-):
+def test_process_file_cleans_tmp_on_error(client, temp_test_file, test_cache_dir):
     """Test that .tmp files are cleaned up when process_file upload fails."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
     file_content = temp_test_file.read_bytes()
     checksum = hashlib.sha256(file_content).hexdigest()
 
@@ -750,12 +731,8 @@ def test_process_file_cleans_tmp_on_error(
     assert len(tmp_files) == 0
 
 
-def test_merge_files_cleans_tmp_on_error(file_servers, coordinators, test_cache_dir):
+def test_merge_files_cleans_tmp_on_error(client, test_cache_dir):
     """Test that .tmp files are cleaned up when merge_files upload fails."""
-    client = Client(
-        "test-client", "localhost:50051", coordinators, file_servers, test_cache_dir
-    )
-
     file1_content = b"2\n3\n5\n"
     file2_content = b"7\n11\n13\n"
 
@@ -805,3 +782,180 @@ def test_merge_files_cleans_tmp_on_error(file_servers, coordinators, test_cache_
     cache_path = Path(test_cache_dir)
     tmp_files = list(cache_path.glob("*.tmp"))
     assert len(tmp_files) == 0
+
+
+def test_upload_success_on_first_attempt(client, upload_test_file):
+    """Test upload succeeds immediately on first try."""
+    mocks = mock_upload_test([fileserver_pb2.UploadResponse(success=True)])
+
+    with mocks["patches"]:
+        result = client._upload_file(upload_test_file, "remote.txt", "localhost:50052")
+
+    assert result is True
+    assert mocks["stub"].UploadFile.call_count == 1
+    mocks["channels"][0].close.assert_called_once()
+
+
+def test_upload_retries_on_failure(upload_test_file, coordinators, test_cache_dir):
+    """Test upload retries with backoff when server returns failure."""
+    multi_servers = ["localhost:50052", "localhost:50053"]
+    client = Client(
+        "test-client", "localhost:50051", coordinators, multi_servers, test_cache_dir
+    )
+
+    mocks = mock_upload_test(
+        [
+            fileserver_pb2.UploadResponse(success=False, error_message="busy"),
+            fileserver_pb2.UploadResponse(success=True),
+        ],
+        jitter=0.3,
+        track_sleep=True,
+    )
+
+    with mocks["patches"]:
+        result = client._upload_file(upload_test_file, "remote.txt", "localhost:50052")
+
+    assert result is True
+    assert mocks["stub"].UploadFile.call_count == 2
+    assert len(mocks["slept"]) == 1
+    assert mocks["slept"][0] == pytest.approx(1.3)
+
+
+def test_upload_rotates_servers_on_failure(
+    upload_test_file, coordinators, test_cache_dir
+):
+    """Test upload rotates through servers after failures."""
+    multi_servers = ["localhost:50052", "localhost:50053", "localhost:50054"]
+    client = Client(
+        "test-client", "localhost:50051", coordinators, multi_servers, test_cache_dir
+    )
+
+    mocks = mock_upload_test(
+        [
+            fileserver_pb2.UploadResponse(success=False, error_message="error1"),
+            fileserver_pb2.UploadResponse(success=False, error_message="error2"),
+            fileserver_pb2.UploadResponse(success=True),
+        ],
+        track_connections=True,
+    )
+
+    with mocks["patches"]:
+        result = client._upload_file(upload_test_file, "remote.txt", "localhost:50052")
+
+    assert result is True
+    assert mocks["stub"].UploadFile.call_count == 3
+    assert mocks["connected_servers"][0] == "localhost:50052"
+    assert mocks["connected_servers"][1] == "localhost:50053"
+    assert mocks["connected_servers"][2] == "localhost:50054"
+
+
+def test_upload_handles_rpc_error(upload_test_file, coordinators, test_cache_dir):
+    """Test upload handles RPC errors and retries."""
+
+    class MockRpcError(grpc.RpcError):
+        def code(self):
+            return grpc.StatusCode.UNAVAILABLE
+
+    multi_servers = ["localhost:50052", "localhost:50053"]
+    client = Client(
+        "test-client", "localhost:50051", coordinators, multi_servers, test_cache_dir
+    )
+
+    mocks = mock_upload_test(
+        [MockRpcError(), fileserver_pb2.UploadResponse(success=True)]
+    )
+
+    with mocks["patches"]:
+        result = client._upload_file(upload_test_file, "remote.txt", "localhost:50052")
+
+    assert result is True
+    assert mocks["stub"].UploadFile.call_count == 2
+    assert mocks["channels"][0].close.call_count == 1
+    assert mocks["channels"][1].close.call_count == 1
+
+
+def test_upload_handles_generic_exception(
+    upload_test_file, coordinators, test_cache_dir
+):
+    """Test upload handles generic exceptions and retries."""
+    multi_servers = ["localhost:50052", "localhost:50053"]
+    client = Client(
+        "test-client", "localhost:50051", coordinators, multi_servers, test_cache_dir
+    )
+
+    mocks = mock_upload_test(
+        [Exception("network error"), fileserver_pb2.UploadResponse(success=True)]
+    )
+
+    with mocks["patches"]:
+        result = client._upload_file(upload_test_file, "remote.txt", "localhost:50052")
+
+    assert result is True
+    assert mocks["stub"].UploadFile.call_count == 2
+    assert mocks["channels"][0].close.call_count == 1
+    assert mocks["channels"][1].close.call_count == 1
+
+
+def test_upload_backoff_caps_at_30_seconds(
+    upload_test_file, coordinators, test_cache_dir
+):
+    """Test upload backoff caps at 30 seconds max."""
+    client = Client(
+        "test-client",
+        "localhost:50051",
+        coordinators,
+        ["localhost:50052"],
+        test_cache_dir,
+    )
+
+    mocks = mock_upload_test(
+        [
+            fileserver_pb2.UploadResponse(success=False, error_message="error"),
+            fileserver_pb2.UploadResponse(success=False, error_message="error"),
+            fileserver_pb2.UploadResponse(success=False, error_message="error"),
+            fileserver_pb2.UploadResponse(success=False, error_message="error"),
+            fileserver_pb2.UploadResponse(success=False, error_message="error"),
+            fileserver_pb2.UploadResponse(success=False, error_message="error"),
+            fileserver_pb2.UploadResponse(success=True),
+        ],
+        track_sleep=True,
+    )
+
+    with mocks["patches"]:
+        result = client._upload_file(upload_test_file, "remote.txt", "localhost:50052")
+
+    assert result is True
+    assert len(mocks["slept"]) == 6
+    assert mocks["slept"][0] == pytest.approx(1.0)
+    assert mocks["slept"][1] == pytest.approx(2.0)
+    assert mocks["slept"][2] == pytest.approx(4.0)
+    assert mocks["slept"][3] == pytest.approx(8.0)
+    assert mocks["slept"][4] == pytest.approx(16.0)
+    assert mocks["slept"][5] == pytest.approx(30.0)
+
+
+def test_upload_resets_backoff_on_server_switch(
+    upload_test_file, coordinators, test_cache_dir
+):
+    """Test upload resets backoff when switching to a different server."""
+    multi_servers = ["localhost:50052", "localhost:50053"]
+    client = Client(
+        "test-client", "localhost:50051", coordinators, multi_servers, test_cache_dir
+    )
+
+    mocks = mock_upload_test(
+        [
+            fileserver_pb2.UploadResponse(success=False, error_message="error"),
+            fileserver_pb2.UploadResponse(success=False, error_message="error"),
+            fileserver_pb2.UploadResponse(success=True),
+        ],
+        track_sleep=True,
+    )
+
+    with mocks["patches"]:
+        result = client._upload_file(upload_test_file, "remote.txt", "localhost:50052")
+
+    assert result is True
+    assert len(mocks["slept"]) == 2
+    assert mocks["slept"][0] == pytest.approx(1.0)
+    assert mocks["slept"][1] == pytest.approx(1.0)
