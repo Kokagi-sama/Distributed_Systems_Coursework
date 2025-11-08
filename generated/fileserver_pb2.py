@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x66ileserver.proto\x12\nfileserver\" \n\x0c\x46\x65tchRequest\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\"W\n\tFileChunk\x12,\n\x08metadata\x18\x01 \x01(\x0b\x32\x18.fileserver.FileMetadataH\x00\x12\x14\n\nchunk_data\x18\x02 \x01(\x0cH\x00\x42\x06\n\x04\x64\x61ta\"\\\n\x0c\x46ileMetadata\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x11\n\tfile_size\x18\x02 \x01(\x03\x12\x15\n\ratomic_upload\x18\x03 \x01(\x08\x12\x10\n\x08\x63hecksum\x18\x04 \x01(\t\"8\n\x0eUploadResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rerror_message\x18\x02 \x01(\t\"\x12\n\x10ListFilesRequest\"&\n\x11ListFilesResponse\x12\x11\n\tfilenames\x18\x01 \x03(\t2\xd9\x01\n\nFileServer\x12>\n\tFetchFile\x12\x18.fileserver.FetchRequest\x1a\x15.fileserver.FileChunk0\x01\x12\x41\n\nUploadFile\x12\x15.fileserver.FileChunk\x1a\x1a.fileserver.UploadResponse(\x01\x12H\n\tListFiles\x12\x1c.fileserver.ListFilesRequest\x1a\x1d.fileserver.ListFilesResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x66ileserver.proto\x12\nfileserver\" \n\x0c\x46\x65tchRequest\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\"W\n\tFileChunk\x12,\n\x08metadata\x18\x01 \x01(\x0b\x32\x18.fileserver.FileMetadataH\x00\x12\x14\n\nchunk_data\x18\x02 \x01(\x0cH\x00\x42\x06\n\x04\x64\x61ta\"E\n\x0c\x46ileMetadata\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x11\n\tfile_size\x18\x02 \x01(\x03\x12\x10\n\x08\x63hecksum\x18\x03 \x01(\t\"8\n\x0eUploadResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rerror_message\x18\x02 \x01(\t\"\x12\n\x10ListFilesRequest\"&\n\x11ListFilesResponse\x12\x11\n\tfilenames\x18\x01 \x03(\t2\xd9\x01\n\nFileServer\x12>\n\tFetchFile\x12\x18.fileserver.FetchRequest\x1a\x15.fileserver.FileChunk0\x01\x12\x41\n\nUploadFile\x12\x15.fileserver.FileChunk\x1a\x1a.fileserver.UploadResponse(\x01\x12H\n\tListFiles\x12\x1c.fileserver.ListFilesRequest\x1a\x1d.fileserver.ListFilesResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -36,13 +36,13 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_FILECHUNK']._serialized_start=66
   _globals['_FILECHUNK']._serialized_end=153
   _globals['_FILEMETADATA']._serialized_start=155
-  _globals['_FILEMETADATA']._serialized_end=247
-  _globals['_UPLOADRESPONSE']._serialized_start=249
-  _globals['_UPLOADRESPONSE']._serialized_end=305
-  _globals['_LISTFILESREQUEST']._serialized_start=307
-  _globals['_LISTFILESREQUEST']._serialized_end=325
-  _globals['_LISTFILESRESPONSE']._serialized_start=327
-  _globals['_LISTFILESRESPONSE']._serialized_end=365
-  _globals['_FILESERVER']._serialized_start=368
-  _globals['_FILESERVER']._serialized_end=585
+  _globals['_FILEMETADATA']._serialized_end=224
+  _globals['_UPLOADRESPONSE']._serialized_start=226
+  _globals['_UPLOADRESPONSE']._serialized_end=282
+  _globals['_LISTFILESREQUEST']._serialized_start=284
+  _globals['_LISTFILESREQUEST']._serialized_end=302
+  _globals['_LISTFILESRESPONSE']._serialized_start=304
+  _globals['_LISTFILESRESPONSE']._serialized_end=342
+  _globals['_FILESERVER']._serialized_start=345
+  _globals['_FILESERVER']._serialized_end=562
 # @@protoc_insertion_point(module_scope)

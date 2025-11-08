@@ -1,6 +1,7 @@
+from unittest.mock import MagicMock, patch
+
 import grpc
 import pytest
-from unittest.mock import MagicMock, patch
 
 from client.client import Client
 from generated import fileserver_pb2
@@ -42,8 +43,10 @@ def test_upload_success_first_try(client_instance, local_file):
 
     channel = MagicMock()
 
-    with patch("grpc.insecure_channel", return_value=channel) as ch_p, \
-         patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub):
+    with (
+        patch("grpc.insecure_channel", return_value=channel) as ch_p,
+        patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub),
+    ):
         ok = client_instance._upload_file(local_file, "remote.txt", "serverA:1111")
 
     assert ok is True
@@ -72,8 +75,10 @@ def test_upload_redirect_then_success(client_instance, local_file):
 
     channels = [MagicMock(), MagicMock()]
 
-    with patch("grpc.insecure_channel", side_effect=channels) as ch_p, \
-         patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub):
+    with (
+        patch("grpc.insecure_channel", side_effect=channels) as ch_p,
+        patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub),
+    ):
         ok = client_instance._upload_file(local_file, "remote.txt", "serverA:1111")
 
     assert ok is True
@@ -96,10 +101,12 @@ def test_upload_rpc_error_then_success_rotates(client_instance, local_file):
     channels = [MagicMock(), MagicMock()]
     slept = []
 
-    with patch("grpc.insecure_channel", side_effect=channels) as ch_p, \
-         patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub), \
-         patch("random.uniform", return_value=0.0), \
-         patch("time.sleep", side_effect=lambda s: slept.append(s)):
+    with (
+        patch("grpc.insecure_channel", side_effect=channels) as ch_p,
+        patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub),
+        patch("random.uniform", return_value=0.0),
+        patch("time.sleep", side_effect=lambda s: slept.append(s)),
+    ):
         ok = client_instance._upload_file(local_file, "remote.txt", "serverA:1111")
 
     assert ok is True
@@ -125,11 +132,13 @@ def test_upload_failure_no_redirect_backoff_then_success(client_instance, local_
     slept = []
 
     # Make rotation deterministic: A -> B -> C (shuffle no-op)
-    with patch("random.shuffle", lambda lst: None), \
-         patch("grpc.insecure_channel", side_effect=channels) as ch_p, \
-         patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub), \
-         patch("random.uniform", return_value=0.4), \
-         patch("time.sleep", side_effect=lambda s: slept.append(s)):
+    with (
+        patch("random.shuffle", lambda lst: None),
+        patch("grpc.insecure_channel", side_effect=channels) as ch_p,
+        patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub),
+        patch("random.uniform", return_value=0.4),
+        patch("time.sleep", side_effect=lambda s: slept.append(s)),
+    ):
         ok = client_instance._upload_file(local_file, "remote.txt", "serverA:1111")
 
     assert ok is True
@@ -147,7 +156,9 @@ def test_redirect_resets_backoff(client_instance, local_file):
     stub = MagicMock()
     stub.UploadFile.side_effect = [
         fileserver_pb2.UploadResponse(
-            success=False, error_message="not primary", new_primary_fileserver="serverC:3333"
+            success=False,
+            error_message="not primary",
+            new_primary_fileserver="serverC:3333",
         ),
         fileserver_pb2.UploadResponse(success=False, error_message="temporary"),
         fileserver_pb2.UploadResponse(success=True),
@@ -156,11 +167,13 @@ def test_redirect_resets_backoff(client_instance, local_file):
     channels = [MagicMock(), MagicMock(), MagicMock()]
     slept = []
 
-    with patch("random.shuffle", lambda lst: None), \
-         patch("grpc.insecure_channel", side_effect=channels) as ch_p, \
-         patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub), \
-         patch("random.uniform", return_value=0.0), \
-         patch("time.sleep", side_effect=lambda s: slept.append(s)):
+    with (
+        patch("random.shuffle", lambda lst: None),
+        patch("grpc.insecure_channel", side_effect=channels) as ch_p,
+        patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub),
+        patch("random.uniform", return_value=0.0),
+        patch("time.sleep", side_effect=lambda s: slept.append(s)),
+    ):
         ok = client_instance._upload_file(local_file, "remote.txt", "serverA:1111")
 
     assert ok is True
