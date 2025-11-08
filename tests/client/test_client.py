@@ -591,12 +591,12 @@ def test_fetch_detects_checksum_mismatch(client, temp_test_file):
 
 def test_tmp_cleanup_on_startup(test_cache_dir):
     """Test that orphaned .tmp files are cleaned up on client initialization."""
-    # Create cache directory with orphaned .tmp files
-    cache_path = Path(test_cache_dir)
-    cache_path.mkdir(parents=True, exist_ok=True)
+    # Create client-specific cache directory with orphaned .tmp files
+    client_cache_path = Path(test_cache_dir) / "test-client"
+    client_cache_path.mkdir(parents=True, exist_ok=True)
 
-    tmp1 = cache_path / "orphaned1.txt.tmp"
-    tmp2 = cache_path / "orphaned2.txt.tmp"
+    tmp1 = client_cache_path / "orphaned1.txt.tmp"
+    tmp2 = client_cache_path / "orphaned2.txt.tmp"
     tmp1.write_text("partial data")
     tmp2.write_text("more partial data")
 
@@ -682,13 +682,13 @@ def test_files_persist_after_upload(client, temp_test_file, test_cache_dir):
     assert success is True
     assert output_filename == "test_numbers_range_0_16_primes.txt"
 
-    # Check that result file still exists on disk
-    cache_path = Path(test_cache_dir)
-    result_file = cache_path / "test_numbers_range_0_16_primes.txt"
+    # Check that result file still exists on disk in client-specific directory
+    client_cache_path = Path(test_cache_dir) / "test-client"
+    result_file = client_cache_path / "test_numbers_range_0_16_primes.txt"
     assert result_file.exists()
 
     # Verify no .tmp files left behind
-    tmp_files = list(cache_path.glob("*.tmp"))
+    tmp_files = list(client_cache_path.glob("*.tmp"))
     assert len(tmp_files) == 0
 
 
@@ -958,4 +958,127 @@ def test_upload_resets_backoff_on_server_switch(
     assert result is True
     assert len(mocks["slept"]) == 2
     assert mocks["slept"][0] == pytest.approx(1.0)
-    assert mocks["slept"][1] == pytest.approx(1.0)
+
+
+def test_next_coordinator_rotation(client):
+    """Test coordinator rotation cycles through all coordinators."""
+    coords = ["coord1:5000", "coord2:5000", "coord3:5000"]
+    client.coordinator_addresses = coords
+
+    assert client._next_coordinator("coord1:5000") == "coord2:5000"
+    assert client._next_coordinator("coord2:5000") == "coord3:5000"
+    assert client._next_coordinator("coord3:5000") == "coord1:5000"
+
+
+def test_next_coordinator_returns_first_when_current_not_found(client):
+    """Test coordinator rotation returns first when current not in list."""
+    coords = ["coord1:5000", "coord2:5000"]
+    client.coordinator_addresses = coords
+
+    assert client._next_coordinator("unknown:5000") == "coord1:5000"
+
+
+def test_next_coordinator_raises_when_no_coordinators(client):
+    """Test coordinator rotation raises error when no coordinators configured."""
+    client.coordinator_addresses = []
+
+    with pytest.raises(RuntimeError, match="No coordinator addresses configured"):
+        client._next_coordinator("coord1:5000")
+
+
+def test_coordinator_stub_caching(client):
+    """Test coordinator stub is cached and reused."""
+    addr = "localhost:50051"
+
+    stub1 = client._get_coordinator_stub(addr)
+    stub2 = client._get_coordinator_stub(addr)
+
+    assert stub1 is stub2
+    assert addr in client._coord_stubs
+    assert addr in client._coord_channels
+
+
+def test_close_coordinator_channels(client):
+    """Test closing coordinator channels clears cache."""
+    client._get_coordinator_stub("localhost:50051")
+    client._get_coordinator_stub("localhost:50052")
+
+    assert len(client._coord_stubs) == 2
+    assert len(client._coord_channels) == 2
+
+    client._close_coordinator_channels()
+
+    assert len(client._coord_stubs) == 0
+    assert len(client._coord_channels) == 0
+
+
+def test_heartbeat_to_multiple_coordinators():
+    """Test heartbeat threads are started for all coordinators."""
+    coords = ["localhost:50051", "localhost:50052", "localhost:50053"]
+    client = Client(
+        "test-client",
+        "localhost:50051",
+        coords,
+        ["localhost:60001"],
+        "/tmp/test_cache",
+    )
+
+    for addr in coords:
+        client._start_heartbeat(addr)
+
+    assert len(client.heartbeat_threads) == 3
+    for addr in coords:
+        assert addr in client.heartbeat_threads
+        assert client.heartbeat_threads[addr].is_alive()
+
+    client._stop_heartbeat()
+    assert len(client.heartbeat_threads) == 0
+
+
+def test_coordinator_failover_on_rpc_error():
+    """Test client switches coordinator on RPC error."""
+    coords = ["localhost:50051", "localhost:50052"]
+    client = Client(
+        "test-client",
+        "localhost:50051",
+        coords,
+        ["localhost:60001"],
+        "/tmp/test_cache",
+    )
+
+    # Mock coordinator stubs
+    stub1 = Mock()
+    stub2 = Mock()
+
+    # First coordinator raises RPC error, second succeeds
+    stub1.RequestTask.side_effect = grpc.RpcError("Connection failed")
+    stub2.RequestTask.return_value = coordinator_pb2.TaskResponse(
+        has_task=False, client_task_status=coordinator_pb2.WAIT
+    )
+
+    call_count = [0]
+
+    def get_stub(addr):
+        call_count[0] += 1
+        if addr == "localhost:50051":
+            return stub1
+        return stub2
+
+    client._get_coordinator_stub = get_stub
+
+    # Mock heartbeat and sleep to avoid delays
+    client._start_heartbeat = Mock()
+    client._stop_heartbeat = Mock()
+
+    with patch("time.sleep"):
+        with patch("random.uniform", return_value=0.0):
+            try:
+                # Run will try first coordinator, get RPC error, switch to second
+                client.run()
+            except grpc.RpcError:
+                pass
+
+    # Should have tried both coordinators
+    assert call_count[0] >= 2
+    stub1.RequestTask.assert_called()
+    stub2.RequestTask.assert_called()

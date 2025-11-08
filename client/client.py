@@ -23,11 +23,12 @@ class Client:
         coordinator_address: str,
         coordinator_addresses: list[str],
         fileserver_addresses: list[str],
-        cache_dir: str = "/tmp/client_cache",
+        cache_dir: str = "./client_cache",
         heartbeat_interval: int = 5,
     ):
         self.client_id = client_id
-        self.cache_dir = Path(cache_dir)
+        # Each client gets its own cache directory to avoid conflicts
+        self.cache_dir = Path(cache_dir) / client_id
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.coordinator_addresses = coordinator_addresses
         self.fileserver_addresses = fileserver_addresses
@@ -44,11 +45,11 @@ class Client:
                         f"[{client_id}] Warning: Could not remove {tmp_file.name}: {e}"
                     )
 
-        # Reusable coordinator channels/stubs cache
+        # Cache coordinator connections to avoid reopening channels
         self._coord_channels: dict[str, grpc.Channel] = {}
         self._coord_stubs: dict[str, coordinator_pb2_grpc.CoordinatorStub] = {}
 
-        # Heartbeat control
+        # Heartbeat threads for each coordinator
         self.heartbeat_threads: dict[str, threading.Thread] = {}
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_running = True
@@ -58,17 +59,10 @@ class Client:
         print(f"[{client_id}] Cache directory: {self.cache_dir}")
         print(f"[{client_id}] File servers: {', '.join(fileserver_addresses)}")
 
-    def _create_coordinator_connection_stub(
-        self, address: str
-    ) -> coordinator_pb2_grpc.CoordinatorStub:
-        """Create Coordinator Connection Stub"""
-        coordinator_channel = grpc.insecure_channel(address)
-        return coordinator_pb2_grpc.CoordinatorStub(coordinator_channel)
-
     def _get_coordinator_stub(
         self, address: str
     ) -> coordinator_pb2_grpc.CoordinatorStub:
-        """Get or create and cache a Coordinator stub for the given address."""
+        """Return existing connection to coordinator or open a new one if needed."""
         stub = self._coord_stubs.get(address)
         if stub is not None:
             return stub
@@ -79,9 +73,9 @@ class Client:
         return stub
 
     def _close_coordinator_channels(self) -> None:
-        """Close all cached coordinator channels and clear caches."""
+        """Close all open coordinator connections."""
         try:
-            for ch in list(self._coord_channels.values()):
+            for ch in self._coord_channels.values():
                 try:
                     ch.close()
                 except Exception:
@@ -91,14 +85,14 @@ class Client:
             self._coord_stubs.clear()
 
     def _next_coordinator(self, current: str) -> str:
-        address = self.coordinator_addresses
-        if not address:
+        addresses = self.coordinator_addresses
+        if not addresses:
             raise RuntimeError("No coordinator addresses configured")
         try:
-            i = address.index(current)
+            i = addresses.index(current)
         except ValueError:
-            return address[0]
-        return address[(i + 1) % len(address)]
+            return addresses[0]
+        return addresses[(i + 1) % len(addresses)]
 
     def _compute_checksum(self, filepath: Path, chunk_size: int = 65536) -> str:
         """Compute SHA-256 checksum of file."""
@@ -219,8 +213,14 @@ class Client:
             f"Failed to fetch {filename} from all file servers: {last_error}"
         )
 
+    def _build_server_rotation_list(self, preferred_address, all_addresses):
+        """Build server list starting with preferred address, others in random order."""
+        others = [addr for addr in all_addresses if addr != preferred_address]
+        random.shuffle(others)
+        return [preferred_address] + others if others else [preferred_address]
+
     def _rotate_to_next_server(self, servers, current_idx, current_addr):
-        """Switch to next server in rotation and reset backoff if server changed."""
+        """Move to next server in list, reset backoff if actually changed."""
         next_idx = (current_idx + 1) % len(servers)
         next_addr = servers[next_idx]
 
@@ -230,20 +230,24 @@ class Client:
 
         return next_idx, next_addr, None
 
+    def _add_jitter(self, base_seconds, max_jitter=0.5):
+        """Add small random delay so retries don't all happen at once."""
+        return base_seconds + random.uniform(0, max_jitter)
+
     def _apply_backoff(self, current_backoff, max_backoff=30.0):
-        """Wait before retry with exponential backoff and jitter."""
-        sleep_seconds = current_backoff + random.uniform(0, 0.5)
-        print(f"[{self.client_id}] Retry in {sleep_seconds:.1f}s...")
+        """Wait before retry using exponential backoff, doubles each time up to max."""
+        sleep_seconds = self._add_jitter(current_backoff)
+        print(f"[{self.client_id}] Retry in {sleep_seconds:.1f}s")
         time.sleep(sleep_seconds)
         return min(max_backoff, current_backoff * 2)
 
     def _handle_upload_redirect(self, redirect, current_addr):
-        """Build new server list with redirect as primary if provided."""
+        """Follow redirect to new primary server if one was provided."""
         if redirect and redirect != current_addr:
             print(f"[{self.client_id}] Redirecting to primary: {redirect}")
-            others = [addr for addr in self.fileserver_addresses if addr != redirect]
-            random.shuffle(others)
-            servers = [redirect] + others if others else [redirect]
+            servers = self._build_server_rotation_list(
+                redirect, self.fileserver_addresses
+            )
             return servers, 0, servers[0], 1.0
 
         return None, None, None, None
@@ -251,18 +255,14 @@ class Client:
     def _upload_file(
         self, local_filepath: Path, remote_filename: str, fileserver_address: str
     ) -> bool:
-        """Upload file with retry on failure.
+        """Upload file to server, retrying until success.
 
-        Retries indefinitely with exponential backoff (capped at 30s).
-        Rotates through available file servers on each failure.
-        Follows redirects to new primary servers when provided.
+        Tries different servers on failure and follows redirects.
+        Wait time doubles after each failure up to 30s, resets when switching servers.
         """
-        # Start with provided address, then shuffle others for failover
-        others = [
-            addr for addr in self.fileserver_addresses if addr != fileserver_address
-        ]
-        random.shuffle(others)
-        servers = [fileserver_address] + others if others else [fileserver_address]
+        servers = self._build_server_rotation_list(
+            fileserver_address, self.fileserver_addresses
+        )
         idx = 0
         current_fileserver_address = servers[idx]
         backoff = 1.0
@@ -295,7 +295,7 @@ class Client:
                     f"[{self.client_id}] Upload to {current_fileserver_address} failed: {response.error_message}"
                 )
 
-                # Check for redirect to new primary
+                # Server may redirect us to the actual primary
                 redirect = getattr(response, "new_primary_fileserver", "")
                 new_servers, new_idx, new_addr, new_backoff = (
                     self._handle_upload_redirect(redirect, current_fileserver_address)
@@ -319,7 +319,7 @@ class Client:
             except grpc.RpcError as e:
                 code = e.code().name if hasattr(e, "code") else "UNKNOWN"
                 print(
-                    f"[{self.client_id}] RPC error to {current_fileserver_address}: {code} - {e}"
+                    f"[{self.client_id}] RPC error to {current_fileserver_address}: {code}, {e}"
                 )
                 backoff = self._apply_backoff(backoff, max_backoff)
                 idx, current_fileserver_address, reset_backoff = (
@@ -332,7 +332,7 @@ class Client:
 
             except Exception as e:
                 print(
-                    f"[{self.client_id}] Upload to {current_fileserver_address} error: {e}"
+                    f"[{self.client_id}] Upload error to {current_fileserver_address}: {e}"
                 )
                 backoff = self._apply_backoff(backoff, max_backoff)
                 idx, current_fileserver_address, reset_backoff = (
@@ -349,7 +349,7 @@ class Client:
                         fileserver_channel.close()
                 except Exception as e:
                     print(
-                        f"[{self.client_id}] Unable to close connection to {current_fileserver_address} error: {e}"
+                        f"[{self.client_id}] Failed to close connection to {current_fileserver_address}: {e}"
                     )
 
     def process_file(
@@ -487,10 +487,10 @@ class Client:
             return False, ""
 
     def _heartbeat_loop(self, address):
-        """Background thread that sends periodic heartbeats."""
+        """Send periodic heartbeat messages to coordinator."""
         while self.heartbeat_running:
             try:
-                coordinator_stub = self._create_coordinator_connection_stub(address)
+                coordinator_stub = self._get_coordinator_stub(address)
                 request = coordinator_pb2.HeartbeatRequest(client_id=self.client_id)
                 response = coordinator_stub.SendHeartbeat(request)
 
@@ -500,12 +500,12 @@ class Client:
                     )
 
             except grpc.RpcError as e:
-                print(f"[{self.client_id}] Heartbeat error: {address} , {e}")
+                print(f"[{self.client_id}] Heartbeat error to {address}: {e}")
 
             time.sleep(self.heartbeat_interval)
 
     def _start_heartbeat(self, address):
-        """Start heartbeat thread."""
+        """Start background thread to send heartbeats to coordinator."""
         if (
             address in self.heartbeat_threads
             and self.heartbeat_threads[address].is_alive
@@ -521,13 +521,13 @@ class Client:
         thread.start()
         self.heartbeat_threads[address] = thread
         print(
-            f"[{self.client_id}] Heartbeat to {address} started with interval: {self.heartbeat_interval}s"
+            f"[{self.client_id}] Started heartbeat to {address} with {self.heartbeat_interval}s interval"
         )
 
     def _stop_heartbeat(self):
-        """Stop all heartbeat threads."""
+        """Stop all heartbeat threads and wait for them to finish."""
         self.heartbeat_running = False
-        for address, thread in list(self.heartbeat_threads.items()):
+        for thread in self.heartbeat_threads.values():
             try:
                 if thread.is_alive():
                     thread.join(timeout=self.heartbeat_interval + 1)
@@ -536,24 +536,23 @@ class Client:
         self.heartbeat_threads.clear()
 
     def run(self):
-        """Main loop: request tasks from coordinator and process them."""
+        """Main loop to request and process tasks from coordinator."""
         print(f"[{self.client_id}] Started")
 
-        # Start heartbeat threads to coordinators
+        # Send heartbeat to all coordinators
         for address in self.coordinator_addresses:
             self._start_heartbeat(address)
 
-        # Start with the first coordinator
+        # Try first coordinator initially
         current_coordinator = self.coordinator_addresses[0]
 
-        # Exponential backoff parameters
+        # Backoff settings for waiting and retries
         base_wait_time = 5
         max_wait_time = 60
         current_wait_time = base_wait_time
 
         while True:
             try:
-                # Request task from coordinator
                 print(f"[{self.client_id}] Requesting task from {current_coordinator}")
 
                 coordinator_stub = self._get_coordinator_stub(current_coordinator)
@@ -562,28 +561,23 @@ class Client:
                     request, timeout=30.0, wait_for_ready=True
                 )
 
-                # Handle different task statuses
                 if not task.has_task:
                     print(f"[{self.client_id}] Stopped: no tasks available")
                     break
 
                 if task.client_task_status == coordinator_pb2.WAIT:
-                    # Exponential backoff
-                    sleep_seconds = current_wait_time + random.uniform(0, 0.5)
-                    print(
-                        f"[{self.client_id}] Waiting for task dependencies for {sleep_seconds:.1f}s"
+                    print(f"[{self.client_id}] Waiting for task dependencies")
+                    current_wait_time = self._apply_backoff(
+                        current_wait_time, max_wait_time
                     )
-                    time.sleep(sleep_seconds)
-                    current_wait_time = min(current_wait_time * 2, max_wait_time)
                     continue
 
-                # Reset wait time on successful task assignment
+                # Got a task, reset backoff
                 current_wait_time = base_wait_time
 
                 print(f"[{self.client_id}] Received task from coordinator")
                 print(f"[{self.client_id}] Task type: {task.task_type}")
 
-                # Process task based on type
                 start_time = time.time()
                 success = False
                 task_id = ""
@@ -654,17 +648,14 @@ class Client:
                 break
             except grpc.RpcError as e:
                 code = e.code().name if hasattr(e, "code") else "UNKNOWN"
-                print(f"[{self.client_id}] RPC error: {code} - {e}")
+                print(f"[{self.client_id}] RPC error: {code}, {e}")
 
-                # Exponential backoff
-                sleep_seconds = current_wait_time + random.uniform(0, 0.5)
-                time.sleep(sleep_seconds)
-                current_wait_time = min(current_wait_time * 2, max_wait_time)
-
-                print(
-                    f"[{self.client_id}] Trying another coordinator after {sleep_seconds:.1f}s"
-                )
                 current_coordinator = self._next_coordinator(current_coordinator)
+                print(f"[{self.client_id}] Trying another coordinator")
+                current_wait_time = base_wait_time
+                current_wait_time = self._apply_backoff(
+                    current_wait_time, max_wait_time
+                )
                 continue
             except Exception as e:
                 print(f"[{self.client_id}] Error: {e}")
