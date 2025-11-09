@@ -60,4 +60,8 @@ message HeartbeatRequest {
 
 message HeartbeatResponse {
     bool acknowledged = 1;
+    
+    // FOR SNAPSHOT:
+    bool trigger_snapshot = 2;
+    string snapshot_id = 3;
 }
