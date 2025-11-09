@@ -6,6 +6,7 @@ from concurrent import futures
 from pathlib import Path
 import argparse
 import csv
+import json
 
 # Add project root to Python path
 project_root = str(Path(__file__).resolve().parents[1])
@@ -18,7 +19,8 @@ from generated import coordinator_pb2_grpc # isort: skip
 # fmt: on
 
 
-class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
+class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
+                        coordinator_pb2_grpc.CoordinatorInternalServicer):
 
     def __init__(
         self,
@@ -26,6 +28,8 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         port: int,
         file_list_path: str,
         client_response_timeout: int = 15,
+        server_id: int = 1,
+        replica_server_address: str = None,
     ):
         self.address = address  # Server address
         self.port = port  # Server port
@@ -37,8 +41,14 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         self.lock = threading.RLock()  # Add a lock for thread safety
         # Time in seconds to wait before considering a client dead
         self.client_response_timeout = client_response_timeout
-
         self.processing_complete = False  # Flag to indicate if processing is complete
+
+        # For primary-replica setup
+        self.primary_server = None  # Is this the primary server
+        # Address of the replica server
+        self.replica_server_address = replica_server_address
+        self.last_primary_heartbeat = 0  # Last heartbeat time from primary server
+
         # State dictionaries to track file processing status
         self.state = {
             "pending_prime": [],
@@ -57,15 +67,16 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
 
     def initialize(self):
         """
-        Initizalizes the server by loading the file list, setting up initial state.
+        Initizalizes the server by connecting to replica server and determining role, 
+        loading the file list, setting up initial state.
         """
         print(f"Initializing Coordinator Server at {self.address}:{self.port}")
-        self.load_file_list()
-        self.initialize_files_for_processing()
-        print(
-            f"Number of files to process: {len(self.state['pending_prime'])}")
-
-        # self.start_heartbeat()
+        self.connect_to_primary()
+        if self.primary_server:
+            self.load_file_list()
+            self.initialize_files_for_processing()
+            print(
+                f"Number of files to process: {len(self.state['pending_prime'])}")
 
     def register_client(self, client_id: str):
         """
@@ -164,8 +175,6 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
                 return True
             return False
 
-    # TODO: change according to implementation, depends on how the state is being organized
-    # Pick a task based on current state and return a Task object
     def create_task(self, client_id: str):
         """Creates a task Obejct based on current state and returns it
 
@@ -223,10 +232,6 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
             print(f"No tasks available to assign to client {client_id}")
             return None
 
-    # TODO: Maybe required depending on implementation
-    def handle_state(self):
-        pass
-
     def complete_task(self, task_id, client_id, new_file: str):
         """Responds to client task complete, updates the state based on completed task
 
@@ -264,9 +269,6 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
                 # Add new returned file to pending de-duplication
                 self.state['pending_de_duplication'].append(new_file)
             self.clients[client_id][2] = 0  # Clear assigned task ID
-
-    def start_heartbeat(self):
-        pass
 
     def check_dead_clients_reassign_tasks(self):
         for client_id, (alive_status, last_heartbeat, assigned_task_id) in self.clients.items():
@@ -318,9 +320,14 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
                 self.clients[client_id][0] = True  # Mark as alive
                 print(f"Heartbeat received from client {client_id}")
 
+    def check_primary(self):
+        with self.lock:
+            return self.primary_server
     # RPC Methods
 
     def RequestTask(self, request, context):
+        if not self.check_primary():
+            return
         client_id = request.client_id
         print(f"Client {client_id} is requesting a task.")
         self.register_client(client_id)
@@ -328,7 +335,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         # No task available
         if not task:
             # Processing complete
-            if self.processing_complete:
+            if self.check_processing_complete():
                 return coordinator_pb2.TaskResponse(has_task=False, client_task_status=coordinator_pb2.ClientTaskStatus.COMPLETED)
             # Processing not complete, but no tasks available
             return coordinator_pb2.TaskResponse(has_task=False, client_task_status=coordinator_pb2.ClientTaskStatus.WAIT)
@@ -356,6 +363,8 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         return coordinator_pb2.TaskResponse(has_task=False)
 
     def UpdateTaskStatus(self, request, context):
+        if not self.check_primary():
+            return
         client_id = request.client_id
         task_id = request.task_id
         output_filename = request.output_filename
@@ -365,17 +374,141 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer):
         return coordinator_pb2.TaskStatusResponse(acknowledged=True)
 
     def SendHeartbeat(self, request, context):
+        if not self.check_primary():
+            return
         client_id = request.client_id
         self.update_heartbeat(client_id)
         return coordinator_pb2.HeartbeatResponse(acknowledged=True)
+
+    # Functions for replica-primary setup
+
+    def connect_to_primary(self):
+        """Tries to connect to primary, if cannot connect assumes to be primary
+        """
+        with self.lock:
+            if self.replica_server_address:
+                # Try to connect to replica server to determine if primary or secondary
+                try:
+                    # Establish a connection to the replica
+                    self.replica_channel = grpc.insecure_channel(
+                        self.replica_server_address)
+                    # Check if the channel is ready
+                    grpc.channel_ready_future(
+                        self.replica_channel).result(timeout=2)
+                    self.replica_stub = coordinator_pb2_grpc.CoordinatorInternalStub(
+                        self.replica_channel)
+                    print("Successfully connected to replica server.")
+                    self.primary_server = False  # This server is secondary
+                except grpc.FutureTimeoutError:
+                    # If cannot connect to replica, this is primary
+                    print(
+                        f"Cannot connect to replica server at {self.replica_server_address}.")
+                    print("This server is primary.")
+                    self.primary_server = True  # This server is primary
+                except Exception as e:
+                    # Unexpected error
+                    print(f"Failed to connect to replica server: {e}")
+                    sys.exit(1)
+
+    def send_internal_heartbeat(self):
+        with self.lock:
+            if not self.primary_server:
+                try:
+                    request = coordinator_pb2.InternalHeartbeatRequest()
+                    response = self.replica_stub.InternalHeartbeat(
+                        request, timeout=2)
+                    if response.acknowledged:
+                        print("Primary acknowledged heartbeat.")
+                        self.last_primary_heartbeat = time.time()
+                except grpc.RpcError as e:
+                    print(f"Failed to send heartbeat to primary: {e}")
+                    print("Assuming primary is down. Promoting to primary.")
+                    self.primary_server = True
+                    self.replica_channel.close()
+                    self.replica_stub = None
+                    self.replica_server_address = None
+
+    def sync_state_to_primary(self):
+        with self.lock:
+            if not self.primary_server:
+                try:
+                    request = coordinator_pb2.GetFullStateRequest()
+                    response = self.replica_stub.GetFullState(
+                        request, timeout=5)
+                    state_json = response.state_json.decode("utf-8")
+                    state_data = json.loads(state_json)
+
+                    # Restore state
+                    self.state = state_data["state"]
+                    self.clients = state_data["clients"]
+                    self.tasks = {}
+                    for task_id, task_dict in state_data["tasks"].items():
+                        task = Task(
+                            task_dict["client_id"],
+                            task_dict["task_type"],
+                            task_dict["task_files"],
+                            task_dict["task_status"],
+                            task_dict["task_id"],
+                        )
+                        self.tasks[int(task_id)] = task
+                    Task.set_global_taskID(int(state_data["task_id_static"]))
+                    self.result_filename = state_data["result_filename"]
+                    self.processing_complete = bool(
+                        state_data["processing_complete"])
+
+                    print("State synchronized from primary server.")
+                except grpc.RpcError as e:
+                    print(f"Failed to sync state from primary: {e}")
+
+    def secondary_server_loop(self):
+        while not self.check_primary():
+            self.send_internal_heartbeat()
+            self.sync_state_to_primary()
+            time.sleep(5)
+
+    # RPC Methods for replica-primary setup
+
+    def InternalHeartbeat(self, request, context):
+        if not self.check_primary():
+            return
+        return coordinator_pb2.InternalHeartbeatResponse(acknowledged=True)
+
+    def GetFullState(self, request, context):
+        # Return the full state of the coordinator server as json
+        with self.lock:
+            if self.primary_server:
+                # Convert Task objects to a serializable format (dictionaries)
+                serializable_tasks = {
+                    task_id: task.__dict__ for task_id, task in self.tasks.items()
+                }
+
+                # Prepare the state data for serialization
+                state_data = {
+                    "state": self.state,
+                    "clients": self.clients,
+                    "tasks": serializable_tasks,
+                    "task_id_static": Task.task_id_static,
+                    "result_filename": self.result_filename,
+                    "processing_complete": self.processing_complete,
+                }
+
+                # Serialize the state data to a JSON string, then encode to bytes
+                state_json_bytes = json.dumps(state_data).encode("utf-8")
+
+                # Return the response
+                return coordinator_pb2.FullStateResponse(state_json=state_json_bytes)
 
     def serve(self):
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
         coordinator_pb2_grpc.add_CoordinatorServicer_to_server(
             self, server)
+        coordinator_pb2_grpc.add_CoordinatorInternalServicer_to_server(
+            self, server)
         server.add_insecure_port(f"{self.address}:{self.port}")
         server.start()
         print(f"Coordinator Server started at {self.address}:{self.port}")
+        if not self.primary_server:
+            self.secondary_server_loop()
         try:
             while True:
                 time.sleep(10)
@@ -389,16 +522,16 @@ class Task:
 
     task_id_static = 0  # Starts from 0, increments with each new task
 
-    def __init__(self, client_id: str, task_type: str, task_files: list, task_status: int = 0):
-        self.task_id = Task.task_id_static + 1
+    def __init__(self, client_id: str, task_type: str, task_files: list, task_status: int = 0, task_id: int = 0):
+        self.task_id = Task.task_id_static + 1 if task_id == 0 else task_id
         self.client_id = client_id
         self.task_type = task_type  # 0: prime, 1: de-duplication
         self.task_files = task_files
         self.task_status = task_status  # 0: in-progress, 1: completed
         Task.task_id_static += 1
 
-    def set_global_taskID(self, task_id: int):
-        Task.task_id_static = self.task_id
+    def set_global_taskID(task_id: int):
+        Task.task_id_static = task_id
 
 
 def main():
@@ -411,6 +544,10 @@ def main():
                         default="file_list.csv", help="Path to the file list")
     parser.add_argument("--timeout", "-t", type=int, default=30,
                         help="Client response timeout (seconds)")
+    parser.add_argument("--server-id", "-s", type=int,
+                        default=1, help="Unique server ID")
+    parser.add_argument("--replica-address", "-r",
+                        default=None, help="Replica server address (if any)")
     args = parser.parse_args()
 
     file_path = Path(args.file_list)
@@ -423,6 +560,8 @@ def main():
         port=args.port,
         file_list_path=str(file_path),
         client_response_timeout=args.timeout,
+        server_id=args.server_id,
+        replica_server_address=args.replica_address,
     )
     coordinator_server.initialize()
     coordinator_server.serve()

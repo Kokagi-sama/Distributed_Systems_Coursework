@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import coordinator_pb2 as coordinator__pb2
+from . import coordinator_pb2 as coordinator__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -11,7 +11,8 @@ _version_not_supported = False
 
 try:
     from grpc._utilities import first_version_is_lower
-    _version_not_supported = first_version_is_lower(GRPC_VERSION, GRPC_GENERATED_VERSION)
+    _version_not_supported = first_version_is_lower(
+        GRPC_VERSION, GRPC_GENERATED_VERSION)
 except ImportError:
     _version_not_supported = True
 
@@ -35,20 +36,20 @@ class CoordinatorStub(object):
             channel: A grpc.Channel.
         """
         self.RequestTask = channel.unary_unary(
-                '/coordinator.Coordinator/RequestTask',
-                request_serializer=coordinator__pb2.TaskRequest.SerializeToString,
-                response_deserializer=coordinator__pb2.TaskResponse.FromString,
-                _registered_method=True)
+            '/coordinator.Coordinator/RequestTask',
+            request_serializer=coordinator__pb2.TaskRequest.SerializeToString,
+            response_deserializer=coordinator__pb2.TaskResponse.FromString,
+            _registered_method=True)
         self.UpdateTaskStatus = channel.unary_unary(
-                '/coordinator.Coordinator/UpdateTaskStatus',
-                request_serializer=coordinator__pb2.TaskStatusRequest.SerializeToString,
-                response_deserializer=coordinator__pb2.TaskStatusResponse.FromString,
-                _registered_method=True)
+            '/coordinator.Coordinator/UpdateTaskStatus',
+            request_serializer=coordinator__pb2.TaskStatusRequest.SerializeToString,
+            response_deserializer=coordinator__pb2.TaskStatusResponse.FromString,
+            _registered_method=True)
         self.SendHeartbeat = channel.unary_unary(
-                '/coordinator.Coordinator/SendHeartbeat',
-                request_serializer=coordinator__pb2.HeartbeatRequest.SerializeToString,
-                response_deserializer=coordinator__pb2.HeartbeatResponse.FromString,
-                _registered_method=True)
+            '/coordinator.Coordinator/SendHeartbeat',
+            request_serializer=coordinator__pb2.HeartbeatRequest.SerializeToString,
+            response_deserializer=coordinator__pb2.HeartbeatResponse.FromString,
+            _registered_method=True)
 
 
 class CoordinatorServicer(object):
@@ -75,43 +76,45 @@ class CoordinatorServicer(object):
 
 def add_CoordinatorServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'RequestTask': grpc.unary_unary_rpc_method_handler(
-                    servicer.RequestTask,
-                    request_deserializer=coordinator__pb2.TaskRequest.FromString,
-                    response_serializer=coordinator__pb2.TaskResponse.SerializeToString,
-            ),
-            'UpdateTaskStatus': grpc.unary_unary_rpc_method_handler(
-                    servicer.UpdateTaskStatus,
-                    request_deserializer=coordinator__pb2.TaskStatusRequest.FromString,
-                    response_serializer=coordinator__pb2.TaskStatusResponse.SerializeToString,
-            ),
-            'SendHeartbeat': grpc.unary_unary_rpc_method_handler(
-                    servicer.SendHeartbeat,
-                    request_deserializer=coordinator__pb2.HeartbeatRequest.FromString,
-                    response_serializer=coordinator__pb2.HeartbeatResponse.SerializeToString,
-            ),
+        'RequestTask': grpc.unary_unary_rpc_method_handler(
+            servicer.RequestTask,
+            request_deserializer=coordinator__pb2.TaskRequest.FromString,
+            response_serializer=coordinator__pb2.TaskResponse.SerializeToString,
+        ),
+        'UpdateTaskStatus': grpc.unary_unary_rpc_method_handler(
+            servicer.UpdateTaskStatus,
+            request_deserializer=coordinator__pb2.TaskStatusRequest.FromString,
+            response_serializer=coordinator__pb2.TaskStatusResponse.SerializeToString,
+        ),
+        'SendHeartbeat': grpc.unary_unary_rpc_method_handler(
+            servicer.SendHeartbeat,
+            request_deserializer=coordinator__pb2.HeartbeatRequest.FromString,
+            response_serializer=coordinator__pb2.HeartbeatResponse.SerializeToString,
+        ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'coordinator.Coordinator', rpc_method_handlers)
+        'coordinator.Coordinator', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('coordinator.Coordinator', rpc_method_handlers)
-
+    server.add_registered_method_handlers(
+        'coordinator.Coordinator', rpc_method_handlers)
 
  # This class is part of an EXPERIMENTAL API.
+
+
 class Coordinator(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
     def RequestTask(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
+                    target,
+                    options=(),
+                    channel_credentials=None,
+                    call_credentials=None,
+                    insecure=False,
+                    compression=None,
+                    wait_for_ready=None,
+                    timeout=None,
+                    metadata=None):
         return grpc.experimental.unary_unary(
             request,
             target,
@@ -130,15 +133,15 @@ class Coordinator(object):
 
     @staticmethod
     def UpdateTaskStatus(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
+                         target,
+                         options=(),
+                         channel_credentials=None,
+                         call_credentials=None,
+                         insecure=False,
+                         compression=None,
+                         wait_for_ready=None,
+                         timeout=None,
+                         metadata=None):
         return grpc.experimental.unary_unary(
             request,
             target,
@@ -157,21 +160,140 @@ class Coordinator(object):
 
     @staticmethod
     def SendHeartbeat(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
+                      target,
+                      options=(),
+                      channel_credentials=None,
+                      call_credentials=None,
+                      insecure=False,
+                      compression=None,
+                      wait_for_ready=None,
+                      timeout=None,
+                      metadata=None):
         return grpc.experimental.unary_unary(
             request,
             target,
             '/coordinator.Coordinator/SendHeartbeat',
             coordinator__pb2.HeartbeatRequest.SerializeToString,
             coordinator__pb2.HeartbeatResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class CoordinatorInternalStub(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.InternalHeartbeat = channel.unary_unary(
+            '/coordinator.CoordinatorInternal/InternalHeartbeat',
+            request_serializer=coordinator__pb2.InternalHeartbeatRequest.SerializeToString,
+            response_deserializer=coordinator__pb2.InternalHeartbeatResponse.FromString,
+            _registered_method=True)
+        self.GetFullState = channel.unary_unary(
+            '/coordinator.CoordinatorInternal/GetFullState',
+            request_serializer=coordinator__pb2.GetFullStateRequest.SerializeToString,
+            response_deserializer=coordinator__pb2.FullStateResponse.FromString,
+            _registered_method=True)
+
+
+class CoordinatorInternalServicer(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def InternalHeartbeat(self, request, context):
+        """Secondary sends heartbeats to Primary
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetFullState(self, request, context):
+        """Used by the SECONDARY to pull the entire state from the PRIMARY
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_CoordinatorInternalServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+        'InternalHeartbeat': grpc.unary_unary_rpc_method_handler(
+            servicer.InternalHeartbeat,
+            request_deserializer=coordinator__pb2.InternalHeartbeatRequest.FromString,
+            response_serializer=coordinator__pb2.InternalHeartbeatResponse.SerializeToString,
+        ),
+        'GetFullState': grpc.unary_unary_rpc_method_handler(
+            servicer.GetFullState,
+            request_deserializer=coordinator__pb2.GetFullStateRequest.FromString,
+            response_serializer=coordinator__pb2.FullStateResponse.SerializeToString,
+        ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+        'coordinator.CoordinatorInternal', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers(
+        'coordinator.CoordinatorInternal', rpc_method_handlers)
+
+ # This class is part of an EXPERIMENTAL API.
+
+
+class CoordinatorInternal(object):
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def InternalHeartbeat(request,
+                          target,
+                          options=(),
+                          channel_credentials=None,
+                          call_credentials=None,
+                          insecure=False,
+                          compression=None,
+                          wait_for_ready=None,
+                          timeout=None,
+                          metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/coordinator.CoordinatorInternal/InternalHeartbeat',
+            coordinator__pb2.InternalHeartbeatRequest.SerializeToString,
+            coordinator__pb2.InternalHeartbeatResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetFullState(request,
+                     target,
+                     options=(),
+                     channel_credentials=None,
+                     call_credentials=None,
+                     insecure=False,
+                     compression=None,
+                     wait_for_ready=None,
+                     timeout=None,
+                     metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/coordinator.CoordinatorInternal/GetFullState',
+            coordinator__pb2.GetFullStateRequest.SerializeToString,
+            coordinator__pb2.FullStateResponse.FromString,
             options,
             channel_credentials,
             insecure,
