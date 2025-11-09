@@ -335,9 +335,10 @@ class Client:
                 try:
                     num = int(line)
                     
-                    #======================================== DEBUG ========================================
-                    print(f"Number line is {line_num}, number type is {type(num)}")
-                    #======================================== DEBUG ======================================== 
+                    # TODO: Remember to delete!!!!!!!!!!!!!!!!!!!
+                    # #======================================== DEBUG ========================================
+                    # print(f"Number line is {line_num}, number type is {type(num)}")
+                    # #======================================== DEBUG ======================================== 
                     
                     if isprime(num):
                         primes.add(num)
