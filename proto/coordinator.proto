@@ -9,6 +9,14 @@ service Coordinator {
     rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
 
+service CoordinatorInternal {
+    // Secondary sends heartbeats to Primary
+    rpc InternalHeartbeat(InternalHeartbeatRequest) returns (InternalHeartbeatResponse);
+
+    // Used by the SECONDARY to pull the entire state from the PRIMARY
+    rpc GetFullState(GetFullStateRequest) returns (FullStateResponse);
+}
+
 enum ClientTaskStatus {
     COMPLETED = 0;
     WAIT = 1;
@@ -60,4 +68,27 @@ message HeartbeatRequest {
 
 message HeartbeatResponse {
     bool acknowledged = 1;
+    
+    // FOR SNAPSHOT:
+    bool trigger_snapshot = 2;
+    string snapshot_id = 3;
+}
+
+// Messages for Replication
+
+message InternalHeartbeatRequest {
+    string server_id = 1; 
+}
+
+message InternalHeartbeatResponse {
+    bool acknowledged = 1;
+}
+
+message GetFullStateRequest {
+    string server_id = 1;
+}
+
+// Message to transfer the entire state as a JSON string
+message FullStateResponse {
+    bytes state_json = 1;
 }
