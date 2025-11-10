@@ -3,6 +3,8 @@ import hashlib
 import random
 import threading
 import time
+import json
+from enum import Enum
 from pathlib import Path
 
 import grpc
@@ -14,6 +16,55 @@ from generated import (
     fileserver_pb2,
     fileserver_pb2_grpc,
 )
+
+
+# =============================== SNAPSHOT ===============================
+class TaskStage(Enum):
+    """Enums for stages of task used for client's state to facilitate snapshot."""
+    IDLE = "IDLE"
+    DOWNLOAD = "DOWNLOAD"
+    UPLOAD = "UPLOAD"
+    FIND_PRIMES = "FIND_PRIMES"
+    MERGE = "MERGE"
+    COMPLETED = "COMPLETED"
+    
+    # Error enums at various stage
+    DOWNLOAD_ERROR = "DOWNLOAD_ERROR"
+    UPLOAD_ERROR = "UPLOAD_ERROR"
+    FIND_PRIMES_ERROR = "FIND_PRIMES_ERROR"
+    MERGE_ERROR = "MERGE+ERROR"
+
+
+class RpcType(Enum):
+    """Enums for rpc incoming or outgoing call.
+    
+    Simple implementation that there was a request/response in flight for use during channel recording.
+    """
+    REQUEST_TO_FILESERVER_UPLOAD = "Requesting to upload to Fileserver"
+    RESPONSE_FROM_FILESERVER_UPLOAD = "Receiving upload response from Fileserver"
+    REQUEST_TO_FILESERVER_DOWNLOAD = "Requesting to download from Fileserver"
+    RESPONSE_FROM_FILESERVER_DOWNLOAD = "Receiving download response from Fileserver"
+    
+    REQUEST_TO_COORDINATOR_GET_TASK = "Requesting task to Coordinator"
+    RESPONSE_FROM_COORDINATOR_GET_TASK = "Receiving task from Coordinator"
+    REQUEST_TO_COORDINATOR_TASK_STATUS = "Requesting task update to Coordinator"
+    RESPONSE_FROM_COORDINATOR_TASK_STATUS = "Receiving task update response from Coordinator"
+
+
+class ProcessState:
+    """Process states for snapshot."""
+    def __init__(self):
+        """Initialise the states. 
+        
+        Progress percentage refers to the progress for that particular stage of the task. It DOES NOT represent the progress of the whole task. E.g., if task_stage="FIND_PRIMES", progress_percentage=60 means the process of "finding primes" is at 60%.
+        
+        COMPLETED will always be 100%; IDLE will always be 0%.
+        """
+        self.task_id: str = ""
+        self.task_stage: TaskStage = TaskStage.IDLE
+        self.progress_percentage: int = 0
+        self.current_file: str = ""
+# ========================================================================
 
 
 class Client:
@@ -51,10 +102,66 @@ class Client:
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_running = True
         self.heartbeat_thread = None
+        
+        # =============================== SNAPSHOT =============================== 
+        # Snapshot state
+        self.snapshot_lock = threading.Lock()
+        self.snapshot_active = False
+        self.snapshot_id = ""
+        self.channel_messages = []  # Simple list of all messages during snapshot
+        self.process_state = ProcessState()
+        # ======================================================================== 
 
         print(f"[{client_id}] Client initialized")
         print(f"[{client_id}] Cache directory: {self.cache_dir}")
         print(f"[{client_id}] File servers: {', '.join(fileserver_addresses)}")
+
+
+    # =============================== SNAPSHOT ===============================
+    def _start_snapshot(self, snapshot_id: str):
+        "Capture client states upon trigger."
+        with self.snapshot_lock:
+            if self.snapshot_active:
+                return
+            self.snapshot_active = True
+            self.snapshot_id = snapshot_id
+            self.channel_messages = []
+
+            state = {
+                "client_id": self.client_id,
+                "snapshot_id": snapshot_id,
+                "task_id": self.process_state.task_id,
+                "task_stage": self.process_state.task_stage.value,
+                "progress": self.process_state.progress_percentage,
+                "file": self.process_state.current_file,
+            }
+        print(f"[{self.client_id}] SNAPSHOT {snapshot_id}: Started - {state}")
+        
+    def _record(self, msg_type, **data):
+        """Record messages if snapshot active."""
+        with self.snapshot_lock:
+            if self.snapshot_active:
+                self.channel_messages.append({"type": msg_type, **data})
+
+    def _receive_marker(self, snapshot_id: str):
+        """Handle marker from coordinator and finalise snapshot."""
+        with self.snapshot_lock:
+            if not self.snapshot_active or self.snapshot_id != snapshot_id:
+                return
+
+            data = {
+                "snapshot_id": snapshot_id,
+                "client_id": self.client_id,
+                "task_id": self.process_state.task_id,
+                "task_stage": self.process_state.task_stage.value,
+                "progress": self.process_state.progress_percentage,
+                "messages": self.channel_messages
+            }
+            print(f"[{self.client_id}] SNAPSHOT {snapshot_id}: {json.dumps(data, indent=2)}")
+            self.snapshot_active = False
+            # TODO: Send data to coordinator via new RPC
+    # ========================================================================
+
 
     def _get_coordinator_stub(self, address: str) -> coordinator_pb2_grpc.CoordinatorStub:
         """Return existing connection to coordinator or open a new one if needed."""
@@ -163,12 +270,29 @@ class Client:
         for fileserver_address in servers:
             try:
                 print(f"[{self.client_id}] Fetching {filename} from {fileserver_address}")
+                
+                # ============ SNAPSHOT ============
+                # Record before sending request to fileserver
+                self._record(RpcType.REQUEST_TO_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
+                
+                # Update task stage and start with 0 progress
+                with self.snapshot_lock:
+                    self.process_state.task_stage = TaskStage.DOWNLOAD
+                    self.process_state.progress_percentage = 0
+                    self.process_state.current_file = filename
+                # ==================================
+                
                 fileserver_channel = grpc.insecure_channel(fileserver_address)
                 fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
 
                 # Request file via RPC
                 request = fileserver_pb2.FetchRequest(filename=filename)
                 chunk_stream = fileserver_stub.FetchFile(request)
+                
+                # ============ SNAPSHOT ============
+                # Record after getting response from fileserver
+                self._record(RpcType.RESPONSE_FROM_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
+                # ==================================
 
                 # Save to local cache
                 cached_path = self.cache_dir / Path(filename).name
@@ -185,11 +309,25 @@ class Client:
 
                 print(f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}")
                 print(f"[{self.client_id}] Cached {filename} locally")
+                
+                # ============ SNAPSHOT ============
+                # Update progress to 100
+                with self.snapshot_lock:
+                    self.process_state.progress_percentage = 100
+                # ==================================
+                
                 return cached_path
 
             except Exception as e:
                 print(f"[{self.client_id}] Failed to fetch from {fileserver_address}: {e}")
                 last_error = e
+                
+                # ============ SNAPSHOT ============
+                with self.snapshot_lock:
+                    self.process_state.task_stage = TaskStage.DOWNLOAD_ERROR
+                    self.process_state.progress_percentage = 0
+                # ==================================
+                
                 continue
             
         raise RuntimeError(f"Failed to fetch {filename} from all file servers: {last_error}")
@@ -249,17 +387,43 @@ class Client:
             try:
                 fileserver_channel = grpc.insecure_channel(current_fileserver_address)
                 fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
+                
+                # ============ SNAPSHOT ============
+                # Record before sending request to fileserver
+                self._record(RpcType.REQUEST_TO_FILESERVER_UPLOAD.value, file=remote_filename, server=current_fileserver_address)
+                
+                # Update task stage and start with 0 progress
+                with self.snapshot_lock:
+                    self.process_state.task_stage = TaskStage.UPLOAD
+                    self.process_state.progress_percentage = 0
+                # ==================================
 
                 # Create fresh iterator for each attempt
                 chunk_iterator = self._stream_upload(local_filepath, remote_filename)
 
                 response = fileserver_stub.UploadFile(chunk_iterator, timeout=60.0, wait_for_ready=True)
+                
+                # ============ SNAPSHOT ============
+                # Record after getting response from fileserver
+                self._record(RpcType.RESPONSE_FROM_FILESERVER_UPLOAD.value, file=remote_filename, server=current_fileserver_address)
+                # ==================================
 
                 if response.success:
                     print(f"[{self.client_id}] Successfully uploaded {remote_filename} to {current_fileserver_address}")
+                    
+                    # ============ SNAPSHOT ============
+                    with self.snapshot_lock:
+                        self.process_state.progress_percentage = 100
+                    # ==================================
                     return True
 
                 print(f"[{self.client_id}] Upload to {current_fileserver_address} failed: {response.error_message}")
+                
+                # ============ SNAPSHOT ============
+                with self.snapshot_lock:
+                    self.process_state.task_stage = TaskStage.UPLOAD_ERROR
+                    self.process_state.progress_percentage = 0
+                # ==================================
 
                 # Server may redirect us to the actual primary
                 redirect_address = response.new_primary_fileserver
@@ -283,6 +447,11 @@ class Client:
                 idx, current_fileserver_address, reset_backoff = (self._rotate_to_next_server(servers, idx, current_fileserver_address))
                 if reset_backoff is not None:
                     backoff = reset_backoff
+                # ============ SNAPSHOT ============
+                with self.snapshot_lock:
+                    self.process_state.task_stage = TaskStage.UPLOAD_ERROR
+                    self.process_state.progress_percentage = 0
+                # ==================================
 
             except Exception as e:
                 print(f"[{self.client_id}] Upload error to {current_fileserver_address}: {e}")
@@ -290,6 +459,11 @@ class Client:
                 idx, current_fileserver_address, reset_backoff = (self._rotate_to_next_server(servers, idx, current_fileserver_address))
                 if reset_backoff is not None:
                     backoff = reset_backoff
+                # ============ SNAPSHOT ============
+                with self.snapshot_lock:
+                    self.process_state.task_stage = TaskStage.UPLOAD_ERROR
+                    self.process_state.progress_percentage = 0
+                # ==================================
 
             finally:
                 try:
@@ -311,7 +485,22 @@ class Client:
             filepath = self._fetch_file(filename)
         except Exception as e:
             print(f"[{self.client_id}] Error: {e}")
+            
+            # ============ SNAPSHOT ============
+            with self.snapshot_lock:
+                self.process_state.task_stage = TaskStage.FIND_PRIMES_ERROR
+                self.process_state.current_file = filename
+                self.process_state.progress_percentage = 0
+            # ==================================
+            
             return False, ""
+
+        # ============ SNAPSHOT ============
+        with self.snapshot_lock:
+            self.process_state.task_stage = TaskStage.FIND_PRIMES
+            self.process_state.current_file = filename
+            self.process_state.progress_percentage = 0
+        # ==================================
 
         print(f"[{self.client_id}] Started processing {filename} from line {start_index} to {end_index - 1}")
 
@@ -328,18 +517,26 @@ class Client:
                 if line_num >= end_index:
                     break
 
+                # ============ SNAPSHOT ============
+                # Update progress every 100 lines
+                if (line_num - start_index) % 100 == 0:
+                    with self.snapshot_lock:
+                        progress = int(((line_num - start_index) / (end_index - start_index)) * 100)
+                        self.process_state.progress_percentage = min(progress, 99)
+                # ==================================
+
                 line = line.strip()
                 if not line:
                     continue
 
                 try:
                     num = int(line)
-                    
+
                     # TODO: Remember to delete!!!!!!!!!!!!!!!!!!!
                     # #======================================== DEBUG ========================================
                     # print(f"Number line is {line_num}, number type is {type(num)}")
-                    # #======================================== DEBUG ======================================== 
-                    
+                    # #======================================== DEBUG ========================================
+
                     if isprime(num):
                         primes.add(num)
                 except ValueError:
@@ -363,6 +560,13 @@ class Client:
 
             # Upload result to primary file server
             success = self._upload_file(result_path, result_filename, primary_fileserver_addr)
+            
+            # ============ SNAPSHOT ============
+            with self.snapshot_lock:
+                self.process_state.task_stage = TaskStage.FIND_PRIMES if success else TaskStage.FIND_PRIMES_ERROR
+                self.process_state.progress_percentage = 100 if success else 0
+            # ==================================
+            
             return success, result_filename
 
         except Exception as e:
@@ -372,6 +576,14 @@ class Client:
                 except Exception:
                     pass
             print(f"[{self.client_id}] Error writing result: {e}")
+            
+            # ============ SNAPSHOT ============
+            with self.snapshot_lock:
+                self.process_state.task_stage = TaskStage.FIND_PRIMES_ERROR
+                self.process_state.current_file = filename
+                self.process_state.progress_percentage = 0
+            # ==================================
+            
             return False, ""
 
     def merge_files(
@@ -381,6 +593,12 @@ class Client:
         print(f"[{self.client_id}] Started merge task: {task_id}")
         print(f"[{self.client_id}]   File 1: {file1}")
         print(f"[{self.client_id}]   File 2: {file2}")
+        
+        # ============ SNAPSHOT ============
+        with self.snapshot_lock:
+            self.process_state.task_stage = TaskStage.MERGE
+            self.process_state.current_file = f"{file1},{file2}"
+        # ==================================
 
         merged_filename = f"merged_{task_id}.txt"
         merged_path = self.cache_dir / merged_filename
@@ -413,6 +631,13 @@ class Client:
 
             # Upload result to primary file server
             success = self._upload_file(merged_path, merged_filename, primary_fileserver_addr)
+            
+            # ============ SNAPSHOT ============
+            with self.snapshot_lock:
+                self.process_state.task_stage = TaskStage.MERGE if success else TaskStage.MERGE_ERROR
+                self.process_state.progress_percentage = 100 if success else 0
+            # ==================================
+            
             return success, merged_filename
 
         except Exception as e:
@@ -422,6 +647,14 @@ class Client:
                 except Exception:
                     pass
             print(f"[{self.client_id}] Merge error: {e}")
+
+            # ============ SNAPSHOT ============
+            with self.snapshot_lock:
+                self.process_state.task_stage = TaskStage.MERGE_ERROR
+                self.process_state.current_file = f"{file1},{file2}"
+                self.process_state.progress_percentage = 0
+            # ==================================
+            
             return False, ""
 
     def _heartbeat_loop(self, address):
@@ -434,6 +667,16 @@ class Client:
 
                 if not response.acknowledged:
                     print(f"[{self.client_id}] Warning: Heartbeat not acknowledged by coordinator {address}")
+                    
+                # ============ SNAPSHOT ============
+                # Handle snapshot trigger
+                if response.trigger_snapshot:
+                    self._start_snapshot(response.snapshot_id)
+                    
+                # Handle snapshot marker
+                if response.snapshot_marker:
+                    self._receive_marker(response.snapshot_id)
+                # ==================================
 
             except grpc.RpcError as e:
                 print(f"[{self.client_id}] Heartbeat error to {address}: {e}")
@@ -488,6 +731,11 @@ class Client:
 
                 coordinator_stub = self._get_coordinator_stub(current_coordinator)
                 request = coordinator_pb2.TaskRequest(client_id=self.client_id)
+                
+                # ============ SNAPSHOT ============
+                self._record(RpcType.REQUEST_TO_COORDINATOR_GET_TASK.value, client_id=self.client_id)
+                # ==================================
+                
                 task = coordinator_stub.RequestTask(request, timeout=30.0, wait_for_ready=True)
 
                 if not task.has_task:
@@ -504,6 +752,13 @@ class Client:
 
                 print(f"[{self.client_id}] Received task from coordinator")
                 print(f"[{self.client_id}] Task type: {task.task_type}")
+                
+                # ============ SNAPSHOT ============
+                with self.snapshot_lock:
+                    self.process_state.task_id = task.task_id
+                
+                self._record(RpcType.RESPONSE_FROM_COORDINATOR_GET_TASK.value, task_id=task.task_id, task_type=task.task_type)
+                # ==================================
 
                 start_time = time.time()
                 success = False
@@ -542,10 +797,22 @@ class Client:
 
                 elapsed = time.time() - start_time
                 print(f"[{self.client_id}] Task completed in {elapsed:.2f}s")
+                
+                # ============ SNAPSHOT ============
+                with self.snapshot_lock:
+                    self.process_state.task_stage = TaskStage.COMPLETED
+                    self.process_state.progress_percentage = 100
+                    self.process_state.current_file = ""
+                # ==================================
 
                 # Update task status to completed
                 if success:
                     print(f"[{self.client_id}] Updating task status to completed")
+                    
+                    # ============ SNAPSHOT ============
+                    self._record(RpcType.REQUEST_TO_COORDINATOR_TASK_STATUS.value, task_id=task_id, output=output_filename)
+                    # ==================================
+                    
                     status_request = coordinator_pb2.TaskStatusRequest(
                         client_id=self.client_id,
                         task_id=task_id,
@@ -553,13 +820,15 @@ class Client:
                         output_filename=output_filename,
                     )
                     response = coordinator_stub.UpdateTaskStatus(status_request)
+                    
+                    # ============ SNAPSHOT ============
+                    self._record(RpcType.RESPONSE_FROM_COORDINATOR_TASK_STATUS.value, task_id=task_id, output=output_filename)
+                    # ==================================
 
                     if response.acknowledged:
                         print(f"[{self.client_id}] Task status updated by coordinator")
                     else:
-                        print(
-                            f"[{self.client_id}] Warning: Task status not acknowledged by coordinator"
-                        )
+                        print(f"[{self.client_id}] Warning: Task status not acknowledged by coordinator")
                 else:
                     print(f"[{self.client_id}] Task failed")
                     print(f"[{self.client_id}] Not acknowledging failed task")
@@ -577,6 +846,14 @@ class Client:
                 current_wait_time = self._apply_backoff(
                     current_wait_time, max_wait_time
                 )
+
+                # ============ SNAPSHOT ============
+                # Update task stage
+                with self.snapshot_lock:
+                    self.process_state.task_stage = TaskStage.IDLE
+                    self.process_state.progress_percentage = 0
+                # ==================================
+                
                 continue
             except Exception as e:
                 print(f"[{self.client_id}] Error: {e}")

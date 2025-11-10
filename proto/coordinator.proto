@@ -7,6 +7,10 @@ service Coordinator {
     rpc UpdateTaskStatus(TaskStatusRequest) returns (TaskStatusResponse);
 
     rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+    // TODO: WIP
+    rpc SendSnapshot(SnapshotRequest) returns (SnapshotResponse);
+    rpc RetrieveSnapshot(SnapshotRetrievalRequest) returns (SnapshotRetrievalResponse);
 }
 
 service CoordinatorInternal {
@@ -72,6 +76,7 @@ message HeartbeatResponse {
     // FOR SNAPSHOT:
     bool trigger_snapshot = 2;
     string snapshot_id = 3;
+    bool snapshot_marker = 4;
 }
 
 // Messages for Replication
@@ -91,4 +96,21 @@ message GetFullStateRequest {
 // Message to transfer the entire state as a JSON string
 message FullStateResponse {
     bytes state_json = 1;
+}
+
+// TODO: WIP
+message SnapshotRequest {
+
+}
+
+message SnapshotResponse {
+
+}
+
+message SnapshotRetrievalRequest {
+
+}
+
+message SnapshotRetrievalResponse {
+
 }
