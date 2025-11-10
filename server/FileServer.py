@@ -29,12 +29,15 @@ STATE_CANDIDATE: str = "CANDIDATE"
 STATE_LEADER: str = "LEADER"
 
 class FileServer(fileserver_pb2_grpc.FileServerServicer):
-    """
-    Distributed File Server implementing Raft for consensus.
-    """
 
     def __init__(
-        self, server_id: str, peers: List[str], port: int, storage_root: str = "fileserver_storage"
+        self, 
+        server_id: str, 
+        peers: List[str], 
+        port: int, 
+        input_storage_root: str = "fileserver_storage",
+        output_storage_root: str = "fileserver_output",
+        snapshot_storage_root: str = "fileserver_snapshots"
     ) -> None:
         self.lock: threading.Lock = threading.Lock()
         self.server_id: str = server_id
@@ -42,7 +45,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         self.port: int = port
 
         # --- PERSISTENT NETWORK CHANNELS ---
-        # Initialize channels once. gRPC handles reconnection internally.
         self.peer_stubs: Dict[str, fileserver_pb2_grpc.FileServerStub] = {}
         for peer in self.peers:
             channel = grpc.insecure_channel(peer)
@@ -50,14 +52,15 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
 
         # --- STORAGE SETUP ---
         self.machine_root: Path = Path(self.server_id)
-        self.storage_dir: Path = self.machine_root / storage_root
-        self.temp_dir: Path = self.storage_dir / "tmp"
-        for p in [self.storage_dir, self.temp_dir]:
+        self.storage_dir: Path = self.machine_root / input_storage_root
+        self.output_dir: Path = self.machine_root / output_storage_root
+        self.snapshot_dir: Path = self.machine_root / snapshot_storage_root
+        self.temp_dir: Path = self.machine_root / "tmp"
+        for p in [self.storage_dir, self.output_dir, self.snapshot_dir, self.temp_dir]:
             p.mkdir(parents=True, exist_ok=True)
 
         # --- IN-MEMORY STATE ---
         self.files: Dict[str, Dict[str, Any]] = {}
-        # Raft Log Proxy: Track highest version seen to judge candidates
         self.max_version: int = 0 
 
         # --- RAFT STATE ---
@@ -72,18 +75,27 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         self._recover_state_from_disk()
         self.running: bool = True
         
-        # Start background Raft threads
         threading.Thread(target=self._consensus_election_monitor, daemon=True).start()
         threading.Thread(target=self._consensus_heartbeat_emitter, daemon=True).start()
 
         print(f"[{self.server_id}] ONLINE | Port: {self.port} | Max Version: {self.max_version}")
+        print(f"[{self.server_id}] Input Dir: {self.storage_dir}")
+        print(f"[{self.server_id}] Output Dir: {self.output_dir}")
+        print(f"[{self.server_id}] Snapshot Dir: {self.snapshot_dir}")
+
 
     # ========================================================================
     # HELPER FUNCTIONS (INTERNAL)
     # ========================================================================
 
+    def _get_final_path(self, filename: str) -> Path:
+        if filename.endswith("_primes.txt") or filename.startswith("merged_"):
+            return self.output_dir / filename
+        elif filename.startswith("snapshot_"):
+            return self.snapshot_dir / filename
+        return self.storage_dir / filename
+
     def _calculate_file_checksum(self, file_path: Path) -> str:
-        """Calculates SHA-256 checksum of a file on disk."""
         hasher = hashlib.sha256()
         try:
             with open(file_path, 'rb') as f:
@@ -93,30 +105,30 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         except FileNotFoundError: return ""
 
     def _save_metadata(self, filename: str, metadata: Dict[str, Any]) -> None:
-        """Persists file metadata to a JSON file on disk."""
-        meta_path = self.storage_dir / f"{filename}.meta"
+        data_path = self._get_final_path(filename)
+        meta_path = data_path.parent / f"{data_path.name}.meta"
         with open(meta_path, 'w') as f:
             json.dump(metadata, f)
 
     def _recover_state_from_disk(self) -> None:
-        """Scans storage directory on startup to rebuild in-memory file map from .meta files."""
         if self.temp_dir.exists(): shutil.rmtree(self.temp_dir)
         self.temp_dir.mkdir()
 
-        for entry in os.scandir(self.storage_dir):
-            if entry.is_file() and entry.name.endswith(".meta"):
-                try:
-                    with open(entry.path, 'r') as f:
-                        meta = json.load(f)
-                    
-                    filename = entry.name[:-5] # remove .meta extension
-                    # Verify the actual data file still exists
-                    if (self.storage_dir / filename).exists():
-                        self.files[filename] = meta
-                        if meta['version'] > self.max_version:
-                            self.max_version = meta['version']
-                except Exception as e:
-                    print(f"[{self.server_id}] Corrupt metadata for {entry.name}: {e}")
+        scan_dirs = [self.storage_dir, self.output_dir, self.snapshot_dir]
+        for dir_path in scan_dirs:
+            for entry in os.scandir(dir_path):
+                if entry.is_file() and entry.name.endswith(".meta"):
+                    try:
+                        with open(entry.path, 'r') as f:
+                            meta = json.load(f)
+                        
+                        filename = entry.name[:-5]
+                        if (dir_path / filename).exists():
+                            self.files[filename] = meta
+                            if meta['version'] > self.max_version:
+                                self.max_version = meta['version']
+                    except Exception as e:
+                        print(f"[{self.server_id}] Corrupt metadata for {entry.name}: {e}")
 
     # ========================================================================
     # CLIENT-FACING RPCs
@@ -125,7 +137,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     def UploadFile(
         self, request_iterator: Iterator[fileserver_pb2.FileChunk], context: grpc.ServicerContext
     ) -> fileserver_pb2.UploadResponse:
-        """Handles file upload from client. Only accepted if LEADER."""
         try:
             first = next(request_iterator)
             if not first.HasField("metadata"): 
@@ -143,7 +154,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             hasher = hashlib.sha256()
             received_bytes = 0
 
-            # Stream to temp file first
             with open(temp_path, 'wb') as f:
                 for chunk in request_iterator:
                     if chunk.HasField("chunk_data"):
@@ -151,8 +161,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                         hasher.update(chunk.chunk_data)
                         received_bytes += len(chunk.chunk_data)
 
-            # Commit file to storage
-            final_path = self.storage_dir / filename
+            final_path = self._get_final_path(filename)
             os.replace(temp_path, final_path)
             final_csum = hasher.hexdigest()
 
@@ -163,12 +172,10 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 
                 self._save_metadata(filename, self.files[filename])
                 
-                # Update log proxy for Raft safety
                 if new_ver > self.max_version: self.max_version = new_ver
 
-            print(f"[{self.server_id}] UPLOAD COMMIT: {filename} (v{new_ver})")
+            print(f"[{self.server_id}] UPLOAD COMMIT: {filename} to {final_path.parent} (v{new_ver})")
             
-            # Trigger async replication to followers
             threading.Thread(target=self._async_replication_manager, 
                              args=(filename, new_ver, final_csum, received_bytes, final_path), 
                              daemon=True).start()
@@ -179,27 +186,59 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     def FetchFile(
         self, request: fileserver_pb2.FetchRequest, context: grpc.ServicerContext
     ) -> Iterator[fileserver_pb2.FileChunk]:
-         """Streams file download to client."""
-         filename = request.filename
-         with self.lock:
+        filename = request.filename
+        meta = None
+        with self.lock:
             meta = self.files.get(filename)
-            if not meta:
+
+        if not meta:
+            if "snapshot.json" in filename:
+                print(f"[{self.server_id}] No {filename} found. Creating temp empty file to stream.")
+                empty_content = b"{}"
+                
+                temp_path = self.temp_dir / f"temp_{filename}_{time.time_ns()}" 
+                try:
+                    with open(temp_path, 'wb') as f:
+                        f.write(empty_content)
+                    
+                    empty_size = len(empty_content)
+                    empty_checksum = hashlib.sha256(empty_content).hexdigest()
+
+                    yield fileserver_pb2.FileChunk(metadata=fileserver_pb2.FileMetadata(
+                        filename=filename, 
+                        file_size=empty_size,
+                        checksum=empty_checksum, 
+                        version=0
+                    ))
+                    
+                    with open(temp_path, 'rb') as f:
+                        yield fileserver_pb2.FileChunk(chunk_data=f.read())
+                    
+                finally:
+                    if temp_path.exists():
+                        try:
+                            temp_path.unlink()
+                        except Exception as e:
+                            print(f"[{self.server_id}] WARN: Failed to delete temp file {temp_path}: {e}")
+                
+                return
+            else:
                 context.abort(grpc.StatusCode.NOT_FOUND, "File not found")
                 return
-            current_meta = meta.copy()
+            
+        current_meta = meta.copy()
 
-         file_path = self.storage_dir / filename
-         if not file_path.exists():
-             context.abort(grpc.StatusCode.DATA_LOSS, "File missing on disk")
+        file_path = self._get_final_path(filename)
+        if not file_path.exists():
+             print(f"[{self.server_id}] DATA LOSS ERROR: Metadata for {filename} exists, but file not found at {file_path}")
+             context.abort(grpc.StatusCode.DATA_LOSS, "File missing on disk despite metadata")
              return
 
-         # Send metadata first
-         yield fileserver_pb2.FileChunk(metadata=fileserver_pb2.FileMetadata(
+        yield fileserver_pb2.FileChunk(metadata=fileserver_pb2.FileMetadata(
                 filename=filename, file_size=current_meta["size"],
                 checksum=current_meta["checksum"], version=current_meta["version"]))
-         
-         # Stream file data
-         with open(file_path, 'rb') as f:
+        
+        with open(file_path, 'rb') as f:
             while True:
                 chunk = f.read(1024 * 1024)
                 if not chunk: break
@@ -212,7 +251,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     def ReplicateFile(
         self, request_iterator: Iterator[fileserver_pb2.ReplicateFileRequest], context: grpc.ServicerContext
     ) -> fileserver_pb2.ReplicateFileResponse:
-        """Handles incoming replication stream from Leader."""
         try:
             first = next(request_iterator)
             if not first.HasField("metadata"): 
@@ -220,7 +258,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             meta = first.metadata
             
             with self.lock:
-                # Idempotency: Don't overwrite if we already have this version
                 if self.files.get(meta.filename, {}).get("version", 0) >= meta.version:
                     return fileserver_pb2.ReplicateFileResponse(error="Already have version")
 
@@ -236,15 +273,15 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 os.remove(temp_path)
                 return fileserver_pb2.ReplicateFileResponse(error="Checksum mismatch")
 
-            os.replace(temp_path, self.storage_dir / meta.filename)
+            final_path = self._get_final_path(meta.filename)
+            os.replace(temp_path, final_path)
+            
             with self.lock:
                 self.files[meta.filename] = {"size": meta.file_size, "checksum": meta.checksum, "version": meta.version}
-                
                 self._save_metadata(meta.filename, self.files[meta.filename])
-                
                 if meta.version > self.max_version: self.max_version = meta.version
             
-            print(f"[{self.server_id}] REPLICATED: {meta.filename} (v{meta.version})")
+            print(f"[{self.server_id}] REPLICATED: {meta.filename} to {final_path.parent} (v{meta.version})")
             return fileserver_pb2.ReplicateFileResponse(error="")
         except Exception as e: 
             return fileserver_pb2.ReplicateFileResponse(error=str(e))
@@ -252,7 +289,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     def _async_replication_manager(
         self, filename: str, version: int, checksum: str, size: int, file_path: Path
     ) -> None:
-        """Spawns threads to replicate a file to all peers."""
         for peer in self.peers:
              threading.Thread(target=self._perform_peer_replication, 
                               args=(peer, filename, version, checksum, size, file_path), daemon=True).start()
@@ -260,7 +296,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     def _perform_peer_replication(
         self, peer: str, filename: str, version: int, checksum: str, size: int, file_path: Path
     ) -> None:
-        """Worker: Replicates file to a single peer."""
         try:
             stub = self.peer_stubs.get(peer)
             if not stub: return
@@ -272,7 +307,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                         c = f.read(1024*1024)
                         if not c: break
                         yield fileserver_pb2.ReplicateFileRequest(file_data=c)
-            # Long timeout for large files
             stub.ReplicateFile(stream(), timeout=60)
         except Exception as e: 
             print(f"[{self.server_id}] Replication FAILED to {peer}: {e}")
@@ -284,25 +318,20 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     def RequestVote(
         self, request: fileserver_pb2.VoteRequest, context: grpc.ServicerContext
     ) -> fileserver_pb2.VoteResponse:
-        """Raft: Handles vote requests from candidates."""
         with self.lock:
-            # 1. Step down if term is higher
             if request.term > self.current_term:
                 print(f"[{self.server_id}] STEP DOWN: Higher term {request.term} in RequestVote")
                 self.current_term = request.term
                 self.state = STATE_FOLLOWER
                 self.voted_for = None
 
-            # 2. Ignore old terms
             if request.term < self.current_term:
                 return fileserver_pb2.VoteResponse(term=self.current_term, vote_granted=False)
 
-            # 3. Log Matching Safety Check: Deny if candidate is stale
             if request.last_log_index < self.max_version:
                  print(f"[{self.server_id}] VOTE DENIED: Candidate {request.candidate_id} is stale")
                  return fileserver_pb2.VoteResponse(term=self.current_term, vote_granted=False)
 
-            # 4. Grant vote if eligible
             if self.voted_for is None or self.voted_for == request.candidate_id:
                 self.voted_for = request.candidate_id
                 self.last_heartbeat = time.time()
@@ -314,15 +343,13 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     def Heartbeat(
         self, request: fileserver_pb2.HeartbeatRequest, context: grpc.ServicerContext
     ) -> fileserver_pb2.HeartbeatResponse:
-        """Raft: Handles heartbeats from Leader to maintain authority."""
         with self.lock:
             if request.term < self.current_term:
-                return fileserver_pb2.HeartbeatResponse(term=self.current_term, success=False)
+                return fileserver_pb2.HeartResponse(term=self.current_term, success=False)
 
             if request.term >= self.current_term:
-                # If we thought WE were leader, step down now.
                 if self.state == STATE_LEADER and request.leader_id != self.server_id:
-                       print(f"[{self.server_id}] STEP DOWN: Discovered valid leader {request.leader_id}")
+                     print(f"[{self.server_id}] STEP DOWN: Discovered valid leader {request.leader_id}")
                 self.current_term = request.term
                 self.state = STATE_FOLLOWER
                 self.leader_id = request.leader_id
@@ -332,7 +359,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             return fileserver_pb2.HeartbeatResponse(term=self.current_term, success=True)
 
     def _trigger_election(self) -> None:
-        """Starts a new election when heartbeat timeout occurs."""
         with self.lock:
             self.state = STATE_CANDIDATE
             self.current_term += 1
@@ -354,7 +380,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                         last_log_index=last_index, last_log_term=0
                     ), timeout=2.0)
                 with self.lock:
-                    # If peer has higher term, abort election immediately
                     if resp.term > self.current_term:
                         self.current_term = resp.term
                         self.state = STATE_FOLLOWER
@@ -364,7 +389,6 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                         votes += 1
             except Exception: pass
 
-        # Send vote requests in parallel
         with futures.ThreadPoolExecutor(max_workers=len(self.peers)) as ex:
             futures.wait([ex.submit(request_vote_worker, p, self.peer_stubs[p]) for p in self.peers], timeout=2.5)
 
@@ -373,17 +397,14 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 self.state = STATE_LEADER
                 self.leader_id = self.server_id
                 print(f"[{self.server_id}] *** ASSUMED LEADERSHIP (Term {term}) ***")
-                # Send immediate heartbeat to assert authority
                 threading.Thread(target=self._emit_heartbeats, daemon=True).start()
 
     def _emit_heartbeats(self) -> None:
-        """Leader only: Sends heartbeats to all peers."""
         with self.lock: term = self.current_term
         for peer, stub in self.peer_stubs.items():
             try:
                 resp = stub.Heartbeat(fileserver_pb2.HeartbeatRequest(term=term, leader_id=self.server_id), timeout=0.5)
                 with self.lock:
-                    # If a peer replies with a higher term, step down.
                     if resp.term > self.current_term:
                          self.current_term = resp.term
                          self.state = STATE_FOLLOWER
@@ -391,36 +412,30 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             except Exception: pass
 
     def _consensus_election_monitor(self) -> None:
-        """Background loop: checks if we need to start an election."""
         while self.running:
             time.sleep(0.1)
             if self.state != STATE_LEADER and (time.time() - self.last_heartbeat > self.election_timeout):
                 self._trigger_election()
 
     def _consensus_heartbeat_emitter(self) -> None:
-        """Background loop: if Leader, sends periodic heartbeats."""
         while self.running:
             time.sleep(1.0)
             if self.state == STATE_LEADER: self._emit_heartbeats()
-
-    # ========================================================================
-    # SNAPSHOT SERVICES
-    # ========================================================================
-
-    def RestoreFromSnapshot(
-        self, request: fileserver_pb2.RestoreRequest, context: grpc.ServicerContext
-    ) -> fileserver_pb2.RestoreResponse:
-        """Restores system state from a specific snapshot ID."""
-        # Placeholder: Implement actual snapshot restoration logic here if needed.
-        return fileserver_pb2.RestoreResponse(success=True, error="")
 
 # ========================================================================
 # MAIN ENTRY POINT
 # ========================================================================
 
-def run_server(server_id: str, port: int, peers: List[str], storage_dir: str) -> None:
+def run_server(
+    server_id: str, 
+    port: int, 
+    peers: List[str], 
+    input_storage_dir: str,
+    output_storage_dir: str,
+    snapshot_storage_dir: str
+) -> None:
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=20))
-    servicer = FileServer(server_id, peers, port, storage_dir)
+    servicer = FileServer(server_id, peers, port, input_storage_dir, output_storage_dir, snapshot_storage_dir) 
     fileserver_pb2_grpc.add_FileServerServicer_to_server(servicer, server)
     server.add_insecure_port(f"[::]:{port}")
     server.start()
@@ -433,6 +448,17 @@ if __name__ == '__main__':
     parser.add_argument("--id", type=str, required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--peers", type=str, default="")
-    parser.add_argument("--storage", type=str, default="./fileserver_storage")
+    parser.add_argument("--input_storage", type=str, default="./fileserver_storage", help="Directory for input files")
+    parser.add_argument("--output_storage", type=str, default="./fileserver_output", help="Directory for output/result files")
+    parser.add_argument("--snapshot_storage", type=str, default="./fileserver_snapshots", help="Directory for snapshot files")
+    
     args = parser.parse_args()
-    run_server(args.id, args.port, [p for p in args.peers.split(",") if p.strip()], args.storage)
+    
+    run_server(
+        args.id, 
+        args.port, 
+        [p for p in args.peers.split(",") if p.strip()], 
+        args.input_storage,
+        args.output_storage,
+        args.snapshot_storage
+    )
