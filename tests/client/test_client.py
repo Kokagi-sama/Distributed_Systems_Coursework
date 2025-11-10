@@ -1066,3 +1066,77 @@ def test_coordinator_failover_on_rpc_error():
     assert call_count[0] >= 2
     stub1.RequestTask.assert_called()
     stub2.RequestTask.assert_called()
+
+
+def test_stream_fetch_overwrites_existing_file(client, test_cache_dir):
+    """Test stream fetch can overwrite existing file atomically."""
+    client_cache_path = Path(test_cache_dir) / "test-client"
+    existing_file = client_cache_path / "test_data.txt"
+    existing_file.write_text("old data from previous fetch")
+
+    new_content = b"new data"
+    chunks = create_fetch_chunks("test_data.txt", new_content, checksum="new_checksum")
+
+    checksum = client._stream_fetch(chunks, existing_file)
+
+    assert existing_file.exists()
+    assert existing_file.read_text() == "new data"
+    assert checksum == "new_checksum"
+
+    tmp_file = Path(str(existing_file) + ".tmp")
+    assert not tmp_file.exists()
+
+
+def test_process_file_overwrites_existing_result(client, test_cache_dir):
+    """Test process file can overwrite existing result file atomically."""
+    client_cache_path = Path(test_cache_dir) / "test-client"
+    result_filename = "test_numbers_range_0_16_primes.txt"
+    existing_result = client_cache_path / result_filename
+    existing_result.write_text("old primes from previous run")
+
+    test_content = b"2\n3\n5\n7\n11\n13\n17\n19\n23\n29\n31\n37\n41\n43\n47\n53\n"
+    mock = mock_fileserver(
+        fetch_file={"filename": "test_numbers.txt", "content": test_content, "checksum": "abc123"},
+        upload_success=True
+    )
+
+    with mock["patches"]:
+        success, result = client.process_file(
+            "test_numbers.txt", "localhost:50052", 0, 16
+        )
+
+    assert success
+    assert result == result_filename
+    assert existing_result.exists()
+    assert "old primes from previous run" not in existing_result.read_text()
+
+    tmp_file = Path(str(existing_result) + ".tmp")
+    assert not tmp_file.exists()
+
+
+def test_merge_files_overwrites_existing_result(client, test_cache_dir):
+    """Test merge files can overwrite existing merged file atomically."""
+    client_cache_path = Path(test_cache_dir) / "test-client"
+
+    file1 = client_cache_path / "primes1.txt"
+    file2 = client_cache_path / "primes2.txt"
+    file1.write_text("2\n3\n5\n")
+    file2.write_text("7\n11\n")
+
+    merged_filename = "merged_task123.txt"
+    existing_merged = client_cache_path / merged_filename
+    existing_merged.write_text("old merged data")
+
+    mock = mock_fileserver(upload_success=True)
+
+    with mock["patches"]:
+        success = client.merge_files(
+            "primes1.txt", "primes2.txt", "task123", "localhost:50052"
+        )
+
+    assert success
+    assert existing_merged.exists()
+    assert "old merged data" not in existing_merged.read_text()
+
+    tmp_file = Path(str(existing_merged) + ".tmp")
+    assert not tmp_file.exists()

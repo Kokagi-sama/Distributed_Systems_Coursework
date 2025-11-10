@@ -136,7 +136,7 @@ class Client:
                     elif chunk.HasField("chunk_data"):
                         f.write(chunk.chunk_data)
 
-            tmp_path.rename(output_path)
+            tmp_path.replace(output_path)
             return server_checksum
 
         except Exception as e:
@@ -358,7 +358,7 @@ class Client:
                 for prime in sorted(primes):
                     f.write(f"{prime}\n")
 
-            tmp_path.rename(result_path)
+            tmp_path.replace(result_path)
             print(f"[{self.client_id}] Wrote deduplicated primes to {result_filename}")
 
             # Upload result to primary file server
@@ -408,7 +408,7 @@ class Client:
                 for prime in sorted(primes):
                     f.write(f"{prime}\n")
 
-            tmp_path.rename(merged_path)
+            tmp_path.replace(merged_path)
             print(f"[{self.client_id}] Wrote merged result to {merged_filename}")
 
             # Upload result to primary file server
