@@ -19,6 +19,14 @@ from generated import (
 
 
 # =============================== SNAPSHOT ===============================
+# Simply snapshot client implementation.
+# Upon trigger from coordinator received via heartbeat response, client captures the process states and starts channel recording.
+# Channel recording takes a simplistic approach in recording before the request is sent and after the response is received rather than monitoring and intercepting rpc calls - since client dont ever receive rpc requests in this design. This is to simulate the idea of capturing in flight calls - you get the idea :)
+# Upon receiving snapshot marker via heartbeat response from coordinator, client stops channel recording.
+# Client then sends the full snapshot - process states + channel states to coordinator.
+# This completes the snapshot process.
+
+
 class TaskStage(Enum):
     """Enums for stages of task used for client's state to facilitate snapshot."""
     IDLE = "IDLE"
