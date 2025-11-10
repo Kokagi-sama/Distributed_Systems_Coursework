@@ -36,18 +36,13 @@ class FileServerStub(object):
         """
         self.FetchFile = channel.unary_stream(
                 '/fileserver.FileServer/FetchFile',
-                request_serializer=fileserver__pb2.MetaData.SerializeToString,
-                response_deserializer=fileserver__pb2.FetchResponse.FromString,
+                request_serializer=fileserver__pb2.FetchRequest.SerializeToString,
+                response_deserializer=fileserver__pb2.FileChunk.FromString,
                 _registered_method=True)
         self.UploadFile = channel.stream_unary(
                 '/fileserver.FileServer/UploadFile',
-                request_serializer=fileserver__pb2.UploadRequest.SerializeToString,
+                request_serializer=fileserver__pb2.FileChunk.SerializeToString,
                 response_deserializer=fileserver__pb2.UploadResponse.FromString,
-                _registered_method=True)
-        self.RetrieveFileList = channel.unary_unary(
-                '/fileserver.FileServer/RetrieveFileList',
-                request_serializer=fileserver__pb2.RetrieveFileListRequest.SerializeToString,
-                response_deserializer=fileserver__pb2.RetrieveFileListResponse.FromString,
                 _registered_method=True)
         self.RequestVote = channel.unary_unary(
                 '/fileserver.FileServer/RequestVote',
@@ -63,21 +58,6 @@ class FileServerStub(object):
                 '/fileserver.FileServer/ReplicateFile',
                 request_serializer=fileserver__pb2.ReplicateFileRequest.SerializeToString,
                 response_deserializer=fileserver__pb2.ReplicateFileResponse.FromString,
-                _registered_method=True)
-        self.InitiateSnapshot = channel.unary_unary(
-                '/fileserver.FileServer/InitiateSnapshot',
-                request_serializer=fileserver__pb2.SnapshotRequest.SerializeToString,
-                response_deserializer=fileserver__pb2.SnapshotResponse.FromString,
-                _registered_method=True)
-        self.Marker = channel.unary_unary(
-                '/fileserver.FileServer/Marker',
-                request_serializer=fileserver__pb2.MarkerMessage.SerializeToString,
-                response_deserializer=fileserver__pb2.MarkerResponse.FromString,
-                _registered_method=True)
-        self.GetSnapshot = channel.unary_unary(
-                '/fileserver.FileServer/GetSnapshot',
-                request_serializer=fileserver__pb2.GetSnapshotRequest.SerializeToString,
-                response_deserializer=fileserver__pb2.GetSnapshotResponse.FromString,
                 _registered_method=True)
         self.RestoreFromSnapshot = channel.unary_unary(
                 '/fileserver.FileServer/RestoreFromSnapshot',
@@ -101,12 +81,6 @@ class FileServerServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def RetrieveFileList(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def RequestVote(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -125,24 +99,6 @@ class FileServerServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def InitiateSnapshot(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def Marker(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def GetSnapshot(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def RestoreFromSnapshot(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -154,18 +110,13 @@ def add_FileServerServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'FetchFile': grpc.unary_stream_rpc_method_handler(
                     servicer.FetchFile,
-                    request_deserializer=fileserver__pb2.MetaData.FromString,
-                    response_serializer=fileserver__pb2.FetchResponse.SerializeToString,
+                    request_deserializer=fileserver__pb2.FetchRequest.FromString,
+                    response_serializer=fileserver__pb2.FileChunk.SerializeToString,
             ),
             'UploadFile': grpc.stream_unary_rpc_method_handler(
                     servicer.UploadFile,
-                    request_deserializer=fileserver__pb2.UploadRequest.FromString,
+                    request_deserializer=fileserver__pb2.FileChunk.FromString,
                     response_serializer=fileserver__pb2.UploadResponse.SerializeToString,
-            ),
-            'RetrieveFileList': grpc.unary_unary_rpc_method_handler(
-                    servicer.RetrieveFileList,
-                    request_deserializer=fileserver__pb2.RetrieveFileListRequest.FromString,
-                    response_serializer=fileserver__pb2.RetrieveFileListResponse.SerializeToString,
             ),
             'RequestVote': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestVote,
@@ -181,21 +132,6 @@ def add_FileServerServicer_to_server(servicer, server):
                     servicer.ReplicateFile,
                     request_deserializer=fileserver__pb2.ReplicateFileRequest.FromString,
                     response_serializer=fileserver__pb2.ReplicateFileResponse.SerializeToString,
-            ),
-            'InitiateSnapshot': grpc.unary_unary_rpc_method_handler(
-                    servicer.InitiateSnapshot,
-                    request_deserializer=fileserver__pb2.SnapshotRequest.FromString,
-                    response_serializer=fileserver__pb2.SnapshotResponse.SerializeToString,
-            ),
-            'Marker': grpc.unary_unary_rpc_method_handler(
-                    servicer.Marker,
-                    request_deserializer=fileserver__pb2.MarkerMessage.FromString,
-                    response_serializer=fileserver__pb2.MarkerResponse.SerializeToString,
-            ),
-            'GetSnapshot': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetSnapshot,
-                    request_deserializer=fileserver__pb2.GetSnapshotRequest.FromString,
-                    response_serializer=fileserver__pb2.GetSnapshotResponse.SerializeToString,
             ),
             'RestoreFromSnapshot': grpc.unary_unary_rpc_method_handler(
                     servicer.RestoreFromSnapshot,
@@ -228,8 +164,8 @@ class FileServer(object):
             request,
             target,
             '/fileserver.FileServer/FetchFile',
-            fileserver__pb2.MetaData.SerializeToString,
-            fileserver__pb2.FetchResponse.FromString,
+            fileserver__pb2.FetchRequest.SerializeToString,
+            fileserver__pb2.FileChunk.FromString,
             options,
             channel_credentials,
             insecure,
@@ -255,35 +191,8 @@ class FileServer(object):
             request_iterator,
             target,
             '/fileserver.FileServer/UploadFile',
-            fileserver__pb2.UploadRequest.SerializeToString,
+            fileserver__pb2.FileChunk.SerializeToString,
             fileserver__pb2.UploadResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def RetrieveFileList(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/fileserver.FileServer/RetrieveFileList',
-            fileserver__pb2.RetrieveFileListRequest.SerializeToString,
-            fileserver__pb2.RetrieveFileListResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -365,87 +274,6 @@ class FileServer(object):
             '/fileserver.FileServer/ReplicateFile',
             fileserver__pb2.ReplicateFileRequest.SerializeToString,
             fileserver__pb2.ReplicateFileResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def InitiateSnapshot(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/fileserver.FileServer/InitiateSnapshot',
-            fileserver__pb2.SnapshotRequest.SerializeToString,
-            fileserver__pb2.SnapshotResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def Marker(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/fileserver.FileServer/Marker',
-            fileserver__pb2.MarkerMessage.SerializeToString,
-            fileserver__pb2.MarkerResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetSnapshot(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/fileserver.FileServer/GetSnapshot',
-            fileserver__pb2.GetSnapshotRequest.SerializeToString,
-            fileserver__pb2.GetSnapshotResponse.FromString,
             options,
             channel_credentials,
             insecure,

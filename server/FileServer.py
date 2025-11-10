@@ -8,6 +8,7 @@ import time
 import random
 import hashlib
 import shutil
+import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Iterator
 
@@ -91,20 +92,31 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             return hasher.hexdigest()
         except FileNotFoundError: return ""
 
+    def _save_metadata(self, filename: str, metadata: Dict[str, Any]) -> None:
+        """Persists file metadata to a JSON file on disk."""
+        meta_path = self.storage_dir / f"{filename}.meta"
+        with open(meta_path, 'w') as f:
+            json.dump(metadata, f)
+
     def _recover_state_from_disk(self) -> None:
-        """Scans storage directory on startup to rebuild in-memory file map."""
+        """Scans storage directory on startup to rebuild in-memory file map from .meta files."""
         if self.temp_dir.exists(): shutil.rmtree(self.temp_dir)
         self.temp_dir.mkdir()
 
         for entry in os.scandir(self.storage_dir):
-            if entry.is_file() and not entry.name.startswith("fs_snapshot"):
-                # Assume recovered files are version 1 if no metadata file exists
-                self.files[entry.name] = {
-                    "size": entry.stat().st_size,
-                    "checksum": self._calculate_file_checksum(Path(entry.path)),
-                    "version": 1
-                }
-                if self.max_version < 1: self.max_version = 1
+            if entry.is_file() and entry.name.endswith(".meta"):
+                try:
+                    with open(entry.path, 'r') as f:
+                        meta = json.load(f)
+                    
+                    filename = entry.name[:-5] # remove .meta extension
+                    # Verify the actual data file still exists
+                    if (self.storage_dir / filename).exists():
+                        self.files[filename] = meta
+                        if meta['version'] > self.max_version:
+                            self.max_version = meta['version']
+                except Exception as e:
+                    print(f"[{self.server_id}] Corrupt metadata for {entry.name}: {e}")
 
     # ========================================================================
     # CLIENT-FACING RPCs
@@ -121,9 +133,9 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             
             if self.state != STATE_LEADER:
                  return fileserver_pb2.UploadResponse(
-                     success=False, 
-                     error_message="Not leader", 
-                     new_primary_fileserver=self.leader_id or ""
+                        success=False, 
+                        error_message="Not leader", 
+                        new_primary_fileserver=self.leader_id or ""
                  )
 
             filename = first.metadata.filename
@@ -148,6 +160,9 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 current_ver = self.files.get(filename, {}).get("version", 0)
                 new_ver = current_ver + 1
                 self.files[filename] = {"size": received_bytes, "checksum": final_csum, "version": new_ver}
+                
+                self._save_metadata(filename, self.files[filename])
+                
                 # Update log proxy for Raft safety
                 if new_ver > self.max_version: self.max_version = new_ver
 
@@ -207,23 +222,26 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             with self.lock:
                 # Idempotency: Don't overwrite if we already have this version
                 if self.files.get(meta.filename, {}).get("version", 0) >= meta.version:
-                     return fileserver_pb2.ReplicateFileResponse(error="Already have version")
+                    return fileserver_pb2.ReplicateFileResponse(error="Already have version")
 
             temp_path = self.temp_dir / f"{meta.filename}.rep"
             hasher = hashlib.sha256()
             with open(temp_path, 'wb') as f:
                 for chunk in request_iterator:
                     if chunk.HasField("file_data"):
-                         f.write(chunk.file_data)
-                         hasher.update(chunk.file_data)
+                        f.write(chunk.file_data)
+                        hasher.update(chunk.file_data)
 
             if hasher.hexdigest() != meta.checksum:
-                 os.remove(temp_path)
-                 return fileserver_pb2.ReplicateFileResponse(error="Checksum mismatch")
+                os.remove(temp_path)
+                return fileserver_pb2.ReplicateFileResponse(error="Checksum mismatch")
 
             os.replace(temp_path, self.storage_dir / meta.filename)
             with self.lock:
                 self.files[meta.filename] = {"size": meta.file_size, "checksum": meta.checksum, "version": meta.version}
+                
+                self._save_metadata(meta.filename, self.files[meta.filename])
+                
                 if meta.version > self.max_version: self.max_version = meta.version
             
             print(f"[{self.server_id}] REPLICATED: {meta.filename} (v{meta.version})")
@@ -304,7 +322,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             if request.term >= self.current_term:
                 # If we thought WE were leader, step down now.
                 if self.state == STATE_LEADER and request.leader_id != self.server_id:
-                     print(f"[{self.server_id}] STEP DOWN: Discovered valid leader {request.leader_id}")
+                       print(f"[{self.server_id}] STEP DOWN: Discovered valid leader {request.leader_id}")
                 self.current_term = request.term
                 self.state = STATE_FOLLOWER
                 self.leader_id = request.leader_id
