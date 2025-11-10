@@ -24,17 +24,17 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11\x63oordinator.proto\x12\x0b\x63oordinator\" \n\x0bTaskRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\xee\x01\n\x0cTaskResponse\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\x10\n\x08has_task\x18\x02 \x01(\x08\x12(\n\ttask_type\x18\x03 \x01(\x0e\x32\x15.coordinator.TaskType\x12\x39\n\x12\x63lient_task_status\x18\x04 \x01(\x0e\x32\x1d.coordinator.ClientTaskStatus\x12\x10\n\x08\x66ilename\x18\x05 \x01(\t\x12\r\n\x05\x66ile1\x18\x06 \x01(\t\x12\r\n\x05\x66ile2\x18\x07 \x01(\t\x12\x13\n\x0bstart_index\x18\x08 \x01(\x03\x12\x11\n\tend_index\x18\t \x01(\x03\"\x8b\x01\n\x11TaskStatusRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\x12\x0f\n\x07task_id\x18\x02 \x01(\t\x12\x39\n\x12\x63lient_task_status\x18\x03 \x01(\x0e\x32\x1d.coordinator.ClientTaskStatus\x12\x17\n\x0foutput_filename\x18\x04 \x01(\t\"*\n\x12TaskStatusResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"%\n\x10HeartbeatRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\"q\n\x11HeartbeatResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\x12\x18\n\x10trigger_snapshot\x18\x02 \x01(\x08\x12\x13\n\x0bsnapshot_id\x18\x03 \x01(\t\x12\x17\n\x0fsnapshot_marker\x18\x04 \x01(\x08\"-\n\x18InternalHeartbeatRequest\x12\x11\n\tserver_id\x18\x01 \x01(\t\"1\n\x19InternalHeartbeatResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"(\n\x13GetFullStateRequest\x12\x11\n\tserver_id\x18\x01 \x01(\t\"\'\n\x11\x46ullStateResponse\x12\x12\n\nstate_json\x18\x01 \x01(\x0c\"\x11\n\x0fSnapshotRequest\"\x12\n\x10SnapshotResponse\"\x1a\n\x18SnapshotRetrievalRequest\"\x1b\n\x19SnapshotRetrievalResponse*+\n\x10\x43lientTaskStatus\x12\r\n\tCOMPLETED\x10\x00\x12\x08\n\x04WAIT\x10\x01*&\n\x08TaskType\x12\x0f\n\x0b\x46IND_PRIMES\x10\x00\x12\t\n\x05MERGE\x10\x01\x32\xa6\x03\n\x0b\x43oordinator\x12\x42\n\x0bRequestTask\x12\x18.coordinator.TaskRequest\x1a\x19.coordinator.TaskResponse\x12S\n\x10UpdateTaskStatus\x12\x1e.coordinator.TaskStatusRequest\x1a\x1f.coordinator.TaskStatusResponse\x12N\n\rSendHeartbeat\x12\x1d.coordinator.HeartbeatRequest\x1a\x1e.coordinator.HeartbeatResponse\x12K\n\x0cSendSnapshot\x12\x1c.coordinator.SnapshotRequest\x1a\x1d.coordinator.SnapshotResponse\x12\x61\n\x10RetrieveSnapshot\x12%.coordinator.SnapshotRetrievalRequest\x1a&.coordinator.SnapshotRetrievalResponse2\xcb\x01\n\x13\x43oordinatorInternal\x12\x62\n\x11InternalHeartbeat\x12%.coordinator.InternalHeartbeatRequest\x1a&.coordinator.InternalHeartbeatResponse\x12P\n\x0cGetFullState\x12 .coordinator.GetFullStateRequest\x1a\x1e.coordinator.FullStateResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11\x63oordinator.proto\x12\x0b\x63oordinator\" \n\x0bTaskRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\xee\x01\n\x0cTaskResponse\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\x10\n\x08has_task\x18\x02 \x01(\x08\x12(\n\ttask_type\x18\x03 \x01(\x0e\x32\x15.coordinator.TaskType\x12\x39\n\x12\x63lient_task_status\x18\x04 \x01(\x0e\x32\x1d.coordinator.ClientTaskStatus\x12\x10\n\x08\x66ilename\x18\x05 \x01(\t\x12\r\n\x05\x66ile1\x18\x06 \x01(\t\x12\r\n\x05\x66ile2\x18\x07 \x01(\t\x12\x13\n\x0bstart_index\x18\x08 \x01(\x03\x12\x11\n\tend_index\x18\t \x01(\x03\"\x8b\x01\n\x11TaskStatusRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\x12\x0f\n\x07task_id\x18\x02 \x01(\t\x12\x39\n\x12\x63lient_task_status\x18\x03 \x01(\x0e\x32\x1d.coordinator.ClientTaskStatus\x12\x17\n\x0foutput_filename\x18\x04 \x01(\t\"*\n\x12TaskStatusResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"%\n\x10HeartbeatRequest\x12\x11\n\tclient_id\x18\x01 \x01(\t\"q\n\x11HeartbeatResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\x12\x18\n\x10trigger_snapshot\x18\x02 \x01(\x08\x12\x13\n\x0bsnapshot_id\x18\x03 \x01(\t\x12\x17\n\x0fsnapshot_marker\x18\x04 \x01(\x08\"-\n\x18InternalHeartbeatRequest\x12\x11\n\tserver_id\x18\x01 \x01(\t\"1\n\x19InternalHeartbeatResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08\"(\n\x13GetFullStateRequest\x12\x11\n\tserver_id\x18\x01 \x01(\t\"\'\n\x11\x46ullStateResponse\x12\x12\n\nstate_json\x18\x01 \x01(\x0c\"\x8c\x01\n\x11SnapshotFileChunk\x12\x13\n\tclient_id\x18\x01 \x01(\tH\x00\x12\x15\n\x0bsnapshot_id\x18\x02 \x01(\tH\x00\x12-\n\x08metadata\x18\x03 \x01(\x0b\x32\x19.coordinator.FileMetadataH\x00\x12\x14\n\nchunk_data\x18\x04 \x01(\x0cH\x00\x42\x06\n\x04\x64\x61ta\"E\n\x0c\x46ileMetadata\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x11\n\tfile_size\x18\x02 \x01(\x03\x12\x10\n\x08\x63hecksum\x18\x03 \x01(\t\"2\n\x1aSnapshotSubmissionResponse\x12\x14\n\x0c\x61\x63knowledged\x18\x01 \x01(\x08*+\n\x10\x43lientTaskStatus\x12\r\n\tCOMPLETED\x10\x00\x12\x08\n\x04WAIT\x10\x01*&\n\x08TaskType\x12\x0f\n\x0b\x46IND_PRIMES\x10\x00\x12\t\n\x05MERGE\x10\x01\x32\xd3\x02\n\x0b\x43oordinator\x12\x42\n\x0bRequestTask\x12\x18.coordinator.TaskRequest\x1a\x19.coordinator.TaskResponse\x12S\n\x10UpdateTaskStatus\x12\x1e.coordinator.TaskStatusRequest\x1a\x1f.coordinator.TaskStatusResponse\x12N\n\rSendHeartbeat\x12\x1d.coordinator.HeartbeatRequest\x1a\x1e.coordinator.HeartbeatResponse\x12[\n\x0eSubmitSnapshot\x12\x1e.coordinator.SnapshotFileChunk\x1a\'.coordinator.SnapshotSubmissionResponse(\x01\x32\xcb\x01\n\x13\x43oordinatorInternal\x12\x62\n\x11InternalHeartbeat\x12%.coordinator.InternalHeartbeatRequest\x1a&.coordinator.InternalHeartbeatResponse\x12P\n\x0cGetFullState\x12 .coordinator.GetFullStateRequest\x1a\x1e.coordinator.FullStateResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'coordinator_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_CLIENTTASKSTATUS']._serialized_start=926
-  _globals['_CLIENTTASKSTATUS']._serialized_end=969
-  _globals['_TASKTYPE']._serialized_start=971
-  _globals['_TASKTYPE']._serialized_end=1009
+  _globals['_CLIENTTASKSTATUS']._serialized_start=1096
+  _globals['_CLIENTTASKSTATUS']._serialized_end=1139
+  _globals['_TASKTYPE']._serialized_start=1141
+  _globals['_TASKTYPE']._serialized_end=1179
   _globals['_TASKREQUEST']._serialized_start=34
   _globals['_TASKREQUEST']._serialized_end=66
   _globals['_TASKRESPONSE']._serialized_start=69
@@ -55,16 +55,14 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_GETFULLSTATEREQUEST']._serialized_end=787
   _globals['_FULLSTATERESPONSE']._serialized_start=789
   _globals['_FULLSTATERESPONSE']._serialized_end=828
-  _globals['_SNAPSHOTREQUEST']._serialized_start=830
-  _globals['_SNAPSHOTREQUEST']._serialized_end=847
-  _globals['_SNAPSHOTRESPONSE']._serialized_start=849
-  _globals['_SNAPSHOTRESPONSE']._serialized_end=867
-  _globals['_SNAPSHOTRETRIEVALREQUEST']._serialized_start=869
-  _globals['_SNAPSHOTRETRIEVALREQUEST']._serialized_end=895
-  _globals['_SNAPSHOTRETRIEVALRESPONSE']._serialized_start=897
-  _globals['_SNAPSHOTRETRIEVALRESPONSE']._serialized_end=924
-  _globals['_COORDINATOR']._serialized_start=1012
-  _globals['_COORDINATOR']._serialized_end=1434
-  _globals['_COORDINATORINTERNAL']._serialized_start=1437
-  _globals['_COORDINATORINTERNAL']._serialized_end=1640
+  _globals['_SNAPSHOTFILECHUNK']._serialized_start=831
+  _globals['_SNAPSHOTFILECHUNK']._serialized_end=971
+  _globals['_FILEMETADATA']._serialized_start=973
+  _globals['_FILEMETADATA']._serialized_end=1042
+  _globals['_SNAPSHOTSUBMISSIONRESPONSE']._serialized_start=1044
+  _globals['_SNAPSHOTSUBMISSIONRESPONSE']._serialized_end=1094
+  _globals['_COORDINATOR']._serialized_start=1182
+  _globals['_COORDINATOR']._serialized_end=1521
+  _globals['_COORDINATORINTERNAL']._serialized_start=1524
+  _globals['_COORDINATORINTERNAL']._serialized_end=1727
 # @@protoc_insertion_point(module_scope)
