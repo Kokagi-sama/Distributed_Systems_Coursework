@@ -514,82 +514,89 @@ class Client:
             print(f"[{self.client_id}] Using local {filename}")
             return local_path
 
-        # Try file servers in random order for load balancing
-        servers = self.fileserver_addresses.copy()
-        random.shuffle(servers)
+        # Keep trying until we succeed (at least one file server should always be alive)
+        retry_count = 0
+        while True:
+            # Try file servers in random order for load balancing
+            servers = self.fileserver_addresses.copy()
+            random.shuffle(servers)
 
-        last_error = None
-        for fileserver_address in servers:
-            fileserver_channel = None
-            try:
-                print(f"[{self.client_id}] Fetching {filename} from {fileserver_address}")
-                
-                # ============ SNAPSHOT ============
-                # Record right firing request
-                self._record(RpcType.REQUEST_TO_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
-                
-                # Update task stage and start with 0 progress
-                with self.snapshot_lock:
-                    self.process_state.task_stage = TaskStage.DOWNLOAD
-                    self.process_state.progress_percentage = 0
-                    self.process_state.current_file = filename
-                # ==================================
-                
-                fileserver_channel = grpc.insecure_channel(fileserver_address)
-                fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
-                
-                request = fileserver_pb2.FetchRequest(filename=filename)
-                chunk_stream = fileserver_stub.FetchFile(request)
-                
-                # ============ SNAPSHOT ============
-                # Record right after getting response from fileserver
-                self._record(RpcType.RESPONSE_FROM_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
-                # ==================================
-                
-                # Save to local cache
-                cached_path = self.cache_dir / Path(filename).name
-                server_checksum = self._stream_fetch(chunk_stream, cached_path)
-                
-                # Verify checksum if provided by server
-                if server_checksum:
-                    computed_checksum = self._compute_checksum(cached_path)
-                    if computed_checksum != server_checksum:
-                        # Delete corrupted file
-                        cached_path.unlink()
-                        raise RuntimeError(f"Checksum verification failed for {filename}: expected {server_checksum}, got {computed_checksum}")
-                    print(f"[{self.client_id}] Successfully verified checksum for {filename}")
+            last_error = None
+            for fileserver_address in servers:
+                fileserver_channel = None
+                try:
+                    print(f"[{self.client_id}] Fetching {filename} from {fileserver_address}")
 
-                print(f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}")
-                print(f"[{self.client_id}] Cached {filename} locally")
-                
-                # ============ SNAPSHOT ============
-                # Update progress to 100
-                with self.snapshot_lock:
-                    self.process_state.progress_percentage = 100
-                # ==================================
-                
-                return cached_path
-            
-            except Exception as e:
-                print(f"[{self.client_id}] Failed to fetch from {fileserver_address}: {e}")
-                last_error = e
-                
-                # ============ SNAPSHOT ============
-                with self.snapshot_lock:
-                    self.process_state.task_stage = TaskStage.DOWNLOAD_ERROR
-                    self.process_state.progress_percentage = 0
-                # ==================================
-                
-                continue
-            
-            finally:
-                if fileserver_channel is not None:
-                    try:
-                        fileserver_channel.close()
-                    except Exception:
-                        pass
-                    
-        raise RuntimeError(f"Failed to fetch {filename} from all file servers: {last_error}")
+                    # ============ SNAPSHOT ============
+                    # Record right firing request
+                    self._record(RpcType.REQUEST_TO_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
+
+                    # Update task stage and start with 0 progress
+                    with self.snapshot_lock:
+                        self.process_state.task_stage = TaskStage.DOWNLOAD
+                        self.process_state.progress_percentage = 0
+                        self.process_state.current_file = filename
+                    # ==================================
+
+                    fileserver_channel = grpc.insecure_channel(fileserver_address)
+                    fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
+
+                    request = fileserver_pb2.FetchRequest(filename=filename)
+                    chunk_stream = fileserver_stub.FetchFile(request)
+
+                    # ============ SNAPSHOT ============
+                    # Record right after getting response from fileserver
+                    self._record(RpcType.RESPONSE_FROM_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
+                    # ==================================
+
+                    # Save to local cache
+                    cached_path = self.cache_dir / Path(filename).name
+                    server_checksum = self._stream_fetch(chunk_stream, cached_path)
+
+                    # Verify checksum if provided by server
+                    if server_checksum:
+                        computed_checksum = self._compute_checksum(cached_path)
+                        if computed_checksum != server_checksum:
+                            # Delete corrupted file
+                            cached_path.unlink()
+                            raise RuntimeError(f"Checksum verification failed for {filename}: expected {server_checksum}, got {computed_checksum}")
+                        print(f"[{self.client_id}] Successfully verified checksum for {filename}")
+
+                    print(f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}")
+                    print(f"[{self.client_id}] Cached {filename} locally")
+
+                    # ============ SNAPSHOT ============
+                    # Update progress to 100
+                    with self.snapshot_lock:
+                        self.process_state.progress_percentage = 100
+                    # ==================================
+
+                    return cached_path
+
+                except Exception as e:
+                    print(f"[{self.client_id}] Failed to fetch from {fileserver_address}")
+                    last_error = e
+
+                    # ============ SNAPSHOT ============
+                    with self.snapshot_lock:
+                        self.process_state.task_stage = TaskStage.DOWNLOAD_ERROR
+                        self.process_state.progress_percentage = 0
+                    # ==================================
+
+                    continue
+
+                finally:
+                    if fileserver_channel is not None:
+                        try:
+                            fileserver_channel.close()
+                        except Exception:
+                            pass
+
+            # All servers failed this round, wait before retrying
+            retry_count += 1
+            backoff_time = min(2 ** retry_count, 30)  # Exponential backoff, max 30 seconds
+            print(f"[{self.client_id}] All file servers failed for {filename}, retrying in {backoff_time}s (attempt {retry_count})")
+            time.sleep(backoff_time)
 
     def _build_server_rotation_list(self, preferred_address, all_addresses):
         """Build server list starting with preferred address, others in random order."""
