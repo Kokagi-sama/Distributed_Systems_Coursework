@@ -493,7 +493,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
             # wait for all clients to send their snapshot
         # Run the rest of the snapshot process in a separate thread to avoid blocking
         snapshot_thread = threading.Thread(
-            target=self._wait_and_finalize_snapshot,
+            target=self.wait_and_finalize_snapshot,
             args=(snapshot_start_time, snapshot_timeout)
         )
         snapshot_thread.start()
