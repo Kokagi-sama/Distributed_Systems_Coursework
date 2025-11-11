@@ -297,7 +297,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
             # Update state based on task type
             if task.task_type == 0:
                 # For prime task
-                if task.task_files[0] not in self.state['in_progress_prime'] or task.task_files[0] in self.state['completed_prime']:
+                if task.task_files[0] not in self.state['in_progress_prime']:
                     print(
                         f"[Coordinator {self.server_id}] Task {task_id} already completed or not in progress.")
                 else:
@@ -711,7 +711,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
         if not self.check_primary():
             return
         client_id = request.client_id
-        snapshot_json = request.snapshot_json.decode("utf-8")
+        snapshot_json = request.snapshot_json
         snapshot_data = json.loads(snapshot_json)
         self.add_client_snapshot(client_id, snapshot_data)
         with self.lock:
