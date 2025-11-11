@@ -24,33 +24,29 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x66ileserver.proto\x12\nfileserver\" \n\x0c\x46\x65tchRequest\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\"W\n\tFileChunk\x12,\n\x08metadata\x18\x01 \x01(\x0b\x32\x18.fileserver.FileMetadataH\x00\x12\x14\n\nchunk_data\x18\x02 \x01(\x0cH\x00\x42\x06\n\x04\x64\x61ta\"V\n\x0c\x46ileMetadata\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x11\n\tfile_size\x18\x02 \x01(\x03\x12\x10\n\x08\x63hecksum\x18\x03 \x01(\t\x12\x0f\n\x07version\x18\x04 \x01(\x03\"X\n\x0eUploadResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rerror_message\x18\x02 \x01(\t\x12\x1e\n\x16new_primary_fileserver\x18\x03 \x01(\t\"`\n\x0bVoteRequest\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x14\n\x0c\x63\x61ndidate_id\x18\x02 \x01(\t\x12\x16\n\x0elast_log_index\x18\x03 \x01(\x03\x12\x15\n\rlast_log_term\x18\x04 \x01(\x03\"2\n\x0cVoteResponse\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x14\n\x0cvote_granted\x18\x02 \x01(\x08\"3\n\x10HeartbeatRequest\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x11\n\tleader_id\x18\x02 \x01(\t\"2\n\x11HeartbeatResponse\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x0f\n\x07success\x18\x02 \x01(\x08\"d\n\x14ReplicateFileRequest\x12,\n\x08metadata\x18\x01 \x01(\x0b\x32\x18.fileserver.FileMetadataH\x00\x12\x13\n\tfile_data\x18\x02 \x01(\x0cH\x00\x42\t\n\x07payload\"&\n\x15ReplicateFileResponse\x12\r\n\x05\x65rror\x18\x01 \x01(\t2\x9b\x02\n\nFileServer\x12>\n\tFetchFile\x12\x18.fileserver.FetchRequest\x1a\x15.fileserver.FileChunk0\x01\x12\x41\n\nUploadFile\x12\x15.fileserver.FileChunk\x1a\x1a.fileserver.UploadResponse(\x01\x12@\n\x0bRequestVote\x12\x17.fileserver.VoteRequest\x1a\x18.fileserver.VoteResponse\x12H\n\tHeartbeat\x12\x1c.fileserver.HeartbeatRequest\x1a\x1d.fileserver.HeartbeatResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x66ileserver.proto\x12\nfileserver\" \n\x0c\x46\x65tchRequest\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\"W\n\tFileChunk\x12,\n\x08metadata\x18\x01 \x01(\x0b\x32\x18.fileserver.FileMetadataH\x00\x12\x14\n\nchunk_data\x18\x02 \x01(\x0cH\x00\x42\x06\n\x04\x64\x61ta\"E\n\x0c\x46ileMetadata\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x11\n\tfile_size\x18\x02 \x01(\x03\x12\x10\n\x08\x63hecksum\x18\x03 \x01(\t\"X\n\x0eUploadResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rerror_message\x18\x02 \x01(\t\x12\x1e\n\x16new_primary_fileserver\x18\x03 \x01(\t\"\x12\n\x10ListFilesRequest\"\x84\x01\n\x11ListFilesResponse\x12>\n\tfile_list\x18\x01 \x03(\x0b\x32+.fileserver.ListFilesResponse.FileListEntry\x1a/\n\rFileListEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x32\xd9\x01\n\nFileServer\x12>\n\tFetchFile\x12\x18.fileserver.FetchRequest\x1a\x15.fileserver.FileChunk0\x01\x12\x41\n\nUploadFile\x12\x15.fileserver.FileChunk\x1a\x1a.fileserver.UploadResponse(\x01\x12H\n\tListFiles\x12\x1c.fileserver.ListFilesRequest\x1a\x1d.fileserver.ListFilesResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'fileserver_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
+  _globals['_LISTFILESRESPONSE_FILELISTENTRY']._loaded_options = None
+  _globals['_LISTFILESRESPONSE_FILELISTENTRY']._serialized_options = b'8\001'
   _globals['_FETCHREQUEST']._serialized_start=32
   _globals['_FETCHREQUEST']._serialized_end=64
   _globals['_FILECHUNK']._serialized_start=66
   _globals['_FILECHUNK']._serialized_end=153
   _globals['_FILEMETADATA']._serialized_start=155
-  _globals['_FILEMETADATA']._serialized_end=241
-  _globals['_UPLOADRESPONSE']._serialized_start=243
-  _globals['_UPLOADRESPONSE']._serialized_end=331
-  _globals['_VOTEREQUEST']._serialized_start=333
-  _globals['_VOTEREQUEST']._serialized_end=429
-  _globals['_VOTERESPONSE']._serialized_start=431
-  _globals['_VOTERESPONSE']._serialized_end=481
-  _globals['_HEARTBEATREQUEST']._serialized_start=483
-  _globals['_HEARTBEATREQUEST']._serialized_end=534
-  _globals['_HEARTBEATRESPONSE']._serialized_start=536
-  _globals['_HEARTBEATRESPONSE']._serialized_end=586
-  _globals['_REPLICATEFILEREQUEST']._serialized_start=588
-  _globals['_REPLICATEFILEREQUEST']._serialized_end=688
-  _globals['_REPLICATEFILERESPONSE']._serialized_start=690
-  _globals['_REPLICATEFILERESPONSE']._serialized_end=728
-  _globals['_FILESERVER']._serialized_start=731
-  _globals['_FILESERVER']._serialized_end=1014
+  _globals['_FILEMETADATA']._serialized_end=224
+  _globals['_UPLOADRESPONSE']._serialized_start=226
+  _globals['_UPLOADRESPONSE']._serialized_end=314
+  _globals['_LISTFILESREQUEST']._serialized_start=316
+  _globals['_LISTFILESREQUEST']._serialized_end=334
+  _globals['_LISTFILESRESPONSE']._serialized_start=337
+  _globals['_LISTFILESRESPONSE']._serialized_end=469
+  _globals['_LISTFILESRESPONSE_FILELISTENTRY']._serialized_start=422
+  _globals['_LISTFILESRESPONSE_FILELISTENTRY']._serialized_end=469
+  _globals['_FILESERVER']._serialized_start=472
+  _globals['_FILESERVER']._serialized_end=689
 # @@protoc_insertion_point(module_scope)

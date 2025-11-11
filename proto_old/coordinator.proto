@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package coordinator;
+
+service Coordinator {
+    rpc RequestTask(TaskRequest) returns (TaskResponse);
+    rpc CompleteTask(TaskCompletionRequest) returns (TaskCompletionResponse);
+    rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+enum TaskType {
+    FIND_PRIMES = 0;
+    MERGE = 1;
+}
+
+message TaskRequest {
+    string client_id = 1;
+}
+
+message TaskResponse {
+    bool has_task = 1;
+    TaskType task_type = 2;
+    string primary_fileserver_addr = 3;
+
+    // For FIND_PRIMES task:
+    string filename = 4;
+
+    // For MERGE task:
+    string task_id = 5;
+    string file1 = 6;
+    string file2 = 7;
+}
+
+message TaskCompletionRequest {
+    string client_id = 1;
+    string task_id = 2;
+}
+
+message TaskCompletionResponse {
+    bool acknowledged = 1;
+}
+
+message HeartbeatRequest {
+    string client_id = 1;
+}
+
+message HeartbeatResponse {
+    bool acknowledged = 1;
+}

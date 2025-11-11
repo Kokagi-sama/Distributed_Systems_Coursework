@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import fileserver_pb2 as fileserver__pb2
+import fileserver_pb2 as fileserver__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -71,14 +71,9 @@ class FileServerServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def RequestVote(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def Heartbeat(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+    def ListFiles(self, request, context):
+        """TODO: No longer needed
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')

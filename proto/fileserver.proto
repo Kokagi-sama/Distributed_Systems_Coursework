@@ -5,8 +5,8 @@ package fileserver;
 service FileServer {
     rpc FetchFile(FetchRequest) returns (stream FileChunk);
     rpc UploadFile(stream FileChunk) returns (UploadResponse);
-    rpc RequestVote (VoteRequest) returns (VoteResponse);
-    rpc Heartbeat (HeartbeatRequest) returns (HeartbeatResponse);
+
+    rpc ListFiles(ListFilesRequest) returns (ListFilesResponse); // TODO: No longer needed
 }
 
 message FetchRequest {
@@ -25,7 +25,6 @@ message FileMetadata {
     string filename = 1;
     int64 file_size = 2;
     string checksum = 3;
-    int64 version = 4;
 }
 
 message UploadResponse {
@@ -64,6 +63,6 @@ message ReplicateFileRequest {
   }
 }
 
-message ReplicateFileResponse {
-  string error = 1;
+message ListFilesResponse {
+    map<string, string> file_list = 1; // Key: filename -> string, Value: checksum -> string
 }
