@@ -1,21 +1,24 @@
 \documentclass[11pt, a4paper]{article}
-
-\usepackage[a4paper, top=2.5cm, bottom=2.5cm, left=2cm, right=2cm]{geometry}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage[a4paper, top=2.2cm, bottom=2.2cm, left=2cm, right=2cm]{geometry}
 \usepackage[english]{babel}
-
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
 \usepackage{titlesec}
-\titlespacing*{\section}{0pt}{1.5\baselineskip}{1\baselineskip}
+\titlespacing*{\section}{0pt}{1.2\baselineskip}{0.8\baselineskip}
 \titlespacing*{\subsection}{0pt}{1.0\baselineskip}{0.5\baselineskip}
-
-\title{Design Report }
-\author{ AFS-Like Distributed File System}
-\date{}
-
+\titlespacing*{\subsubsection}{0pt}{1.0\baselineskip}{0.5\baselineskip}
 \usepackage[hidelinks]{hyperref}
 \usepackage{textcomp}
-\usepackage{graphicx} % <<< ADDED THIS PACKAGE
+\usepackage{framed}
+
+\title{Design Report: Distributed Prime Finding Platform}
+\author{AFS-Like Distributed File System}
+\date{}
 
 \begin{document}
 
@@ -23,72 +26,62 @@
 \thispagestyle{empty}
 \pagestyle{headings}
 
-
 \section{Executive Summary}
 
-This report presents the design and implementation of a fault-tolerant AFS Distributed File System for finding prime numbers in large datasets. The system uses a three-tier architecture in which coordinators and file servers are replicated, applies the Raft consensus algorithm for election of new leader file server, employs global snapshots for consistent state capture and crash recovery, and provides fault tolerance through multiple redundancy layers.
+This report presents the design and implementation of a fault-tolerant distributed system for finding prime numbers in large datasets. The system has two components: an AFS-like distributed file system and a distributed prime-finding application.
 
-System Scale: Multiple Workers, Replicated Coordinators (active-passive), and Replicated File Servers (leader-followers).
+The file system uses a replicated leader-follower architecture employing the Raft consensus algorithm. The application uses a coordinator-worker model to distribute computation, with workers processing data chunks in parallel.
 
-Communication: gRPC protocol
+Fault tolerance is achieved through active-passive replication for the coordinator, Raft consensus for file servers, and consistent global snapshots for crash recovery and task resumption.
 
-Key Algorithms: Global snapshots, Raft consensus, exponential backoff with failover
-
-\section{Failure Types Handled}
-
-Failure Type		Detection				        Recovery									    Guarantee
-Client Crash		Alive lock file on restart	    Global snapshot download + task resumption	    Eventually consistent
-Coordinator Crash	gRPC timeout		            Failover to secondary coordinator			    High availability
-FileServer Crash	gRPC timeout				    Raft leader election						    Linearizable consistency
-Network Partition	gRPC deadline exceeded	        Exponential backoff + retry					    Eventually consistent
-Data Corruption		Checksum mismatch		        Reject + retry download						    Strong integrity
-Task Failure		Client loses heartbeart	        Coordinator times out and reassigns task		At-least-once semantics
-
-\section{Assumptions}
-
-Network Assumptions:
-Eventual Connectivity:  Network partitions are transient
-Non-Byzantine:          No malicious actors (crash-fail model)
-Bounded Latency:        Sufficient gRPC timeouts (30-60 seconds)
-
-Timing Assumptions:
-Partially Synchronous:  Bounded message delays
-
-Storage Assumptions:
-Persistent Storage:     File servers have durable storage
-Atomic Rename:          POSIX-compliant file systems
-No Silent Corruption:   Disk errors
-
-Process Assumptions:
-Fail-Stop:              Processes crash cleanly (no stuck states)
-Independent Failures:   Worker crashes are uncorrelated
-
-\section{Limitations Not Handled}
-Byzantine Failures:                 Malicious clients/servers
-Network Delays > Timeout:           Premature timeouts treated as failures
-Concurrent Coordinator Failures:    Requires manual intervention
-File Server Quorum Loss:            System halts if > N/2 servers fail
-Disk Corruption:                    Silent data corruption not detected beyond checksums
+\begin{description}
+    \item[System Scale:] Multiple Workers, Replicated Coordinators, and Replicated File Servers.
+    \item[Communication:] gRPC protocol
+    \item[Key Algorithms:] Global snapshots, Raft consensus, exponential backoff with failover
+\end{description}
 
 \section{System Model}
 
-This report explains the design for a distributed fault tolerant system that finds unique prime numbers and store them in a file server.
+The system finds unique prime numbers and stores them in a distributed file server. It comprises three process types communicating via gRPC over an asynchronous network with possible crash-fail errors.
+
+\begin{description}
+    \item[\textbf{File Servers (Replicated):}] A Raft-based replicated cluster for high-availability storage.
+    \item[\textbf{Application Coordinator (Replicated):}] A central replicated service managing task assignment and snapshots.
+    \item[\textbf{Application Workers:}] A pool of processes performing computation and interacting with File Servers.
+\end{description}
+
+\section{System Assumptions and Limitations}
+
+\subsection{Assumptions}
+\begin{description}
+    \item[Network:] Eventual connectivity with transient partitions. Crash-fail model with 30–60 s gRPC timeouts.
+    \item[Storage:] Durable POSIX-compliant storage; no silent disk corruption.
+    \item[Processes:] Fail-stop failures, independent and uncorrelated.
+\end{description}
+
+\subsection{Limitations}
+\begin{description}
+    \item[Byzantine Failures:] Not supported.
+    \item[Extreme Delays:] Treated as process failures.
+    \item[Concurrent Failures:] Manual intervention required for coordinator or quorum loss.
+\end{description}
+
+\section{Part 1: AFS-Like Distributed File System}
+
+The file system provides highly available, read-optimized storage for datasets and results.
+
+\subsection{Architecture and Core RPCs}
+
+The design implements an AFS-like whole-file caching model. Clients fetch the full file on open and perform local reads. Writes are flushed on close.
 
 \begin{itemize}
-    \item \textbf{System Model:} The system is consists of the following (File Servers, Coordinator, Workers) communicating over an asynchronous network. Processes and network links can fail (e.g., crash failures, network partitions).
-
-    \item \textbf{Core Components:}
-          \begin{enumerate}
-              \item \textbf{File Primary and Replicated Servers:} A replicated, high-availability file server based on the Raft consensus algorithm.
-              \item \textbf{Application Coordinators:} A central service that manages the task assignments, splits work, and triggers snapshots.
-              \item \textbf{Application Workers:} A Worker process that requests tasks from the Coordinator, performs computation, and interacts with the File Servers.
-          \end{enumerate}
+    \item \texttt{UploadFile(stream FileChunk)}: worker uploads
+    \item \texttt{FetchFile(FetchRequest)}: worker downloads
+    \item \texttt{RequestVote(VoteRequest)}: Raft leader election
+    \item \texttt{Heartbeat(HeartbeatRequest)}: Raft authority maintenance
+    \item \texttt{ReplicateFile(stream Req)}: leader data replication to followers
 \end{itemize}
 
-
-\section{AFS Distributed File System}
-
-The file system provides highly-available storage for input datasets and output results as shown in Figure (1).
 
 \begin{figure}[htbp]
     \centering
@@ -97,62 +90,45 @@ The file system provides highly-available storage for input datasets and output 
     \label{fig:system_design}
 \end{figure}
 
-\subsection{Architecture \& Core RPCs}
 
-The system communications falls under the following RPC commands:
-
+\subsection{File Server Fault Tolerance (Raft)}
 
 \begin{itemize}
-    \item UploadFile(stream FileChunk): Handles worker file uploads (writes).
-    \item FetchFile(FetchRequest): Handles worker file downloads (reads).
-    \item RequestVote(VoteRequest): Internal Raft RPC for leader election.
-    \item Heartbeat(HeartbeatRequest): Internal Raft RPC for leader authority and liveness.
-    \item ReplicateFile(stream ReplicateFileRequest): Internal RPC for the leader to push file data to followers.
+    \item \textbf{Leader Election:} Servers start as Followers. If no heartbeats are received within a randomized timeout, a server becomes Candidate, requests votes, and if it wins a majority, becomes Leader.
+    \item \textbf{Write Path:} Only the Leader handles \texttt{UploadFile}, commits data locally, and replicates via \texttt{ReplicateFile}.
+    \item \textbf{Read Path:} Any server can serve reads, enabling load balancing.
 \end{itemize}
 
+\pagebreak
 
+\section{Part 2: Distributed Prime Finding Application}
 
-\newpage
-\subsection{Fault Tolerance}
+The application layer manages distributed computation via a Coordinator-Worker model.
 
-High availability is achieved at multiple levels. For the application, a backup coordinator and task re-assignment logic are used. For the file servers, the \textbf{Raft consensus algorithm} is used, not a simple primary-backup.
-
-
-\subsubsection*{Application Fault Tolerance}
-\begin{itemize}
-    \item \textbf{Coordinator Failure (Backup Coordinator):} To prevent the Coordinator from being
-          a single point of failure, a backup Coordinator runs in the background.
-          If the primary Coordinator fails (detected via missed heartbeats), the backup takes over.
-          Workers are configured to automatically connect to the backup's address.
-
-    \item \textbf{Worker Failure (Heartbeating):} Workers send periodic heartbeats to the Coordinator.
-          If the Coordinator does not receive a heartbeat from a worker after a set timeout,
-          it marks the worker as 'dead' and the task as 'failed' and assigns it to another worker.
-
-    \item \textbf{Task Re-assignment \& Snapshots:} When a task is marked as failed,
-          the Coordinator re-assigns it to a new, available worker.
-          To avoid starting from scratch, workers periodically save their progress
-          to the file system. The new worker loads this snapshot and resumes computation
-          from the last checkpoint.
-\end{itemize}
-
-\newpage
-
-\subsubsection*{File Server Fault Tolerance (Raft)}
-
+\subsection{Application Fault Tolerance}
 
 \begin{itemize}
-    \item \textbf{Leader Election:} Servers start as (Follower). If no heartbeats are received from a leader within a randomized timeout, a server becomes a (Candidate), increments its term, and requests votes. If it wins a majority, it becomes (Leader).
-    \item \textbf{Write Path (Leader-Only):} All write operations (UploadFile) are handled exclusively by the leader. If a worker contacts a follower, the follower rejects the request, and the worker is responsible for retrying with another server until it finds the leader.
-    \item \textbf{Replication Path:}
-          \begin{enumerate}
-              \item The Leader accepts an (UploadFile) stream from a worker.
-              \item It commits the file to its local storage and updates its in-memory file map (version, checksum, etc.).
-              \item It then triggers an asynchronous replication to all followers.
-              \item The Primary server calls the ReplicateFile RPC on each follower, streaming the new file data to them.
-          \end{enumerate}
-    \item \textbf{Read Path (Read-Optimized):} Any server (Leader or Follower) can service a FetchFile request. This aligns with the read-heavy AFS-like specification, allowing read load to be balanced across all nodes.
+    \item \textbf{Coordinator Failure:} A backup runs in active-passive mode. On primary failure, workers reconnect to the backup.
+    \item \textbf{Worker Failure:} Workers send heartbeats to the Coordinator. Missing heartbeats mark the worker dead and trigger task reassignment.
+    \item \textbf{Task Re-assignment:} Failed tasks are reassigned. Workers save progress to the file system as snapshots, enabling resumed computation.
 \end{itemize}
 
+\section{Failure Handling Summary}
+
+\begin{table}[htbp]
+    \centering
+    \caption{Failure Types and Recovery Mechanisms}
+    \label{tab:failures}
+    \begin{tabular}{@{}p{3.5cm}p{4cm}p{5cm}p{3cm}@{}}
+        \toprule
+        \textbf{Failure Type} & \textbf{Detection} & \textbf{Recovery}               & \textbf{Guarantee}       \\ \midrule
+        Client/Worker Crash   & Alive lock file    & Snapshot reload and task resume & Eventually consistent    \\
+        Coordinator Crash     & gRPC timeout       & Failover to secondary           & High availability        \\
+        FileServer Crash      & gRPC timeout       & Raft leader election            & Linearizable consistency \\
+        Network Partition     & Deadline exceeded  & Exponential backoff and retry   & Eventually consistent    \\
+        Data Corruption       & Checksum mismatch  & Reject and retry                & Strong integrity         \\
+        Task Failure          & Heartbeat timeout  & Task reassignment               & At-least-once semantics  \\ \bottomrule
+    \end{tabular}
+\end{table}
 
 \end{document}
