@@ -596,7 +596,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                     fileserver_channel.close()
             except Exception as e:
                 print(
-                    f"[{self.client_id}] Failed to close connection to the file server")
+                    f"[{self.server_id}] Failed to close connection to the file server")
 
             return return_value
 
