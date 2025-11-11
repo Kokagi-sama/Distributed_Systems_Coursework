@@ -89,7 +89,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     # ========================================================================
 
     def _get_final_path(self, filename: str) -> Path:
-        if filename.endswith("_primes.txt") or filename.startswith("merged_"):
+        if filename.endswith("primes.txt") or filename.startswith("merged_"):
             return self.output_dir / filename
         elif filename.startswith("snapshot_"):
             return self.snapshot_dir / filename
@@ -161,7 +161,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             print(f"[{self.server_id}] WARN: Input directory {self.storage_dir} not found during scan.")
         except Exception as e:
             print(f"[{self.server_id}] ERROR: Failed to scan input dir {self.storage_dir}: {e}")
-            
+
     # ========================================================================
     # CLIENT-FACING RPCs
     # ========================================================================
@@ -395,7 +395,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
     ) -> fileserver_pb2.HeartbeatResponse:
         with self.lock:
             if request.term < self.current_term:
-                return fileserver_pb2.HeartResponse(term=self.current_term, success=False)
+                return fileserver_pb2.HeartbeatResponse(term=self.current_term, success=False)
 
             if request.term >= self.current_term:
                 if self.state == STATE_LEADER and request.leader_id != self.server_id:
