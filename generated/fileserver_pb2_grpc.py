@@ -44,10 +44,15 @@ class FileServerStub(object):
                 request_serializer=fileserver__pb2.FileChunk.SerializeToString,
                 response_deserializer=fileserver__pb2.UploadResponse.FromString,
                 _registered_method=True)
-        self.ListFiles = channel.unary_unary(
-                '/fileserver.FileServer/ListFiles',
-                request_serializer=fileserver__pb2.ListFilesRequest.SerializeToString,
-                response_deserializer=fileserver__pb2.ListFilesResponse.FromString,
+        self.RequestVote = channel.unary_unary(
+                '/fileserver.FileServer/RequestVote',
+                request_serializer=fileserver__pb2.VoteRequest.SerializeToString,
+                response_deserializer=fileserver__pb2.VoteResponse.FromString,
+                _registered_method=True)
+        self.Heartbeat = channel.unary_unary(
+                '/fileserver.FileServer/Heartbeat',
+                request_serializer=fileserver__pb2.HeartbeatRequest.SerializeToString,
+                response_deserializer=fileserver__pb2.HeartbeatResponse.FromString,
                 _registered_method=True)
 
 
@@ -86,10 +91,15 @@ def add_FileServerServicer_to_server(servicer, server):
                     request_deserializer=fileserver__pb2.FileChunk.FromString,
                     response_serializer=fileserver__pb2.UploadResponse.SerializeToString,
             ),
-            'ListFiles': grpc.unary_unary_rpc_method_handler(
-                    servicer.ListFiles,
-                    request_deserializer=fileserver__pb2.ListFilesRequest.FromString,
-                    response_serializer=fileserver__pb2.ListFilesResponse.SerializeToString,
+            'RequestVote': grpc.unary_unary_rpc_method_handler(
+                    servicer.RequestVote,
+                    request_deserializer=fileserver__pb2.VoteRequest.FromString,
+                    response_serializer=fileserver__pb2.VoteResponse.SerializeToString,
+            ),
+            'Heartbeat': grpc.unary_unary_rpc_method_handler(
+                    servicer.Heartbeat,
+                    request_deserializer=fileserver__pb2.HeartbeatRequest.FromString,
+                    response_serializer=fileserver__pb2.HeartbeatResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -157,7 +167,7 @@ class FileServer(object):
             _registered_method=True)
 
     @staticmethod
-    def ListFiles(request,
+    def RequestVote(request,
             target,
             options=(),
             channel_credentials=None,
@@ -170,9 +180,36 @@ class FileServer(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/fileserver.FileServer/ListFiles',
-            fileserver__pb2.ListFilesRequest.SerializeToString,
-            fileserver__pb2.ListFilesResponse.FromString,
+            '/fileserver.FileServer/RequestVote',
+            fileserver__pb2.VoteRequest.SerializeToString,
+            fileserver__pb2.VoteResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Heartbeat(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/fileserver.FileServer/Heartbeat',
+            fileserver__pb2.HeartbeatRequest.SerializeToString,
+            fileserver__pb2.HeartbeatResponse.FromString,
             options,
             channel_credentials,
             insecure,

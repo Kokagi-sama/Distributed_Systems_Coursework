@@ -33,7 +33,35 @@ message UploadResponse {
     string new_primary_fileserver = 3;
 }
 
-message ListFilesRequest {}
+message VoteRequest {
+  int64 term = 1;
+  string candidate_id = 2;
+  int64 last_log_index = 3;
+  int64 last_log_term = 4;
+}
+
+message VoteResponse {
+  int64 term = 1;
+  bool vote_granted = 2;
+}
+
+message HeartbeatRequest {
+  int64 term = 1;
+  string leader_id = 2;
+}
+
+message HeartbeatResponse {
+  int64 term = 1;
+  bool success = 2;
+}
+
+
+message ReplicateFileRequest {
+  oneof payload {
+    FileMetadata metadata = 1;
+    bytes file_data = 2;
+  }
+}
 
 message ListFilesResponse {
     map<string, string> file_list = 1; // Key: filename -> string, Value: checksum -> string
