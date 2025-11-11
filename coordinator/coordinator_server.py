@@ -443,11 +443,12 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
         self.update_heartbeat(client_id)
         with self.lock:
             trigger_snapshot = self.clients[client_id][3]
+            snapshot_marker = self.clients[client_id][4]
             if trigger_snapshot:
                 self.clients[client_id][3] = False  # Reset snapshot bool
                 # Start snapshot channel recording
                 self.clients[client_id][4] = True
-            snapshot_marker = self.clients[client_id][4]
+
             if snapshot_marker:
                 # Reset snapshot channel recording
                 self.clients[client_id][4] = False
