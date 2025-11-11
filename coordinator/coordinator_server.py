@@ -7,6 +7,7 @@ from pathlib import Path
 import argparse
 import csv
 import json
+import hashlib
 
 # Add project root to Python path
 project_root = str(Path(__file__).resolve().parents[1])
@@ -29,9 +30,11 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
         address: str,
         port: int,
         file_list_path: str,
+        fileserver_addresses: list[str],
         client_response_timeout: int = 15,
         server_id: int = 1,
         replica_server_address: str = None,
+        snapshot_interval: int = 60,
     ):
         self.address = address  # Server address
         self.port = port  # Server port
@@ -52,6 +55,18 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
         self.replica_server_address = replica_server_address
         self.last_primary_heartbeat = 0  # Last heartbeat time from primary server
 
+        # Snapshot stuff
+        # Interval in seconds to take snapshots
+        self.coordinator_addresses = fileserver_addresses
+        self.snapshot_interval = snapshot_interval
+        self.last_snapshot_time = time.time()  # Last snapshot time
+
+        self.server_uptime = time.time()  # Server start time
+
+        self.snapshot = {}  # To store snapshot data
+
+        self.snapshot_tracker = {}  # To track snapshot status of clients
+
         # State dictionaries to track file processing status
         self.state = {
             "pending_prime": [],
@@ -63,7 +78,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
         }
         self.result_filename = ""  # To store the final result filename
 
-        # To track connected clients/workers {client_id: [alive_status, last_heartbeat_time, assigned_task_id]}
+        # To track connected clients/workers {client_id: [alive_status, last_heartbeat_time, assigned_task_id, snapshot_bool, snapshot_channel_recording]}
         self.clients = {}
 
         self.tasks = {}  # To track tasks {task_id: Task object}
@@ -77,10 +92,16 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
             f"[Coordinator {self.server_id}] Initializing Coordinator Server at {self.address}:{self.port}")
         self.connect_to_primary()
         if self.primary_server:
-            self.load_file_list()
-            self.initialize_files_for_processing()
-            print(
-                f"[Coordinator {self.server_id}] Number of files to process: {len(self.state['pending_prime'])}")
+            snapshot_data = self.get_gloabl_snapshot_from_fs()
+            if snapshot_data:
+                print(
+                    f"[Coordinator {self.server_id}] Restoring state from retrieved snapshot.")
+                self.restore_state(snapshot_data["coordinator"])
+            else:
+                self.load_file_list()
+                self.initialize_files_for_processing()
+                print(
+                    f"[Coordinator {self.server_id}] Number of files to process: {len(self.state['pending_prime'])}")
 
     def register_client(self, client_id: str):
         """
@@ -90,8 +111,8 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
             if client_id not in self.clients:
                 print(
                     f"[Coordinator {self.server_id}] Registering new client: {client_id}")
-                # [alive_status, last_heartbeat_time, assigned_task_id]
-                self.clients[client_id] = [True, time.time(), 0]
+                # [alive_status, last_heartbeat_time, assigned_task_id, snapshot_bool, snapshot_channel_recording]
+                self.clients[client_id] = [True, time.time(), 0, False, False]
             else:
                 print(
                     f"[Coordinator {self.server_id}] Client {client_id} is already registered.")
@@ -208,11 +229,20 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                     self.result_filename = self.state['pending_de_duplication'][0]
                     print(
                         f"[Coordinator {self.server_id}] Processing complete. Final result file: {self.result_filename}")
-                return None
+            return None
+
+            # In progress empty becuase not assigned yet. Only two current tasks should be there in the in-progress state
+            if (self.state['pending_de_duplication'] == [] and
+                self.state['in_progress_de_duplication'] == [] and
+                self.state['pending_prime'] == [] and
+                    self.state['in_progress_prime'] == []):
+                final_task = True
             else:
-                return None  # No tasks available
+                final_task = False
+
             # Creating Task object
-            task = Task(client_id, task_type, task_files)
+            task = Task(client_id, task_type, task_files,
+                        final_task=final_task)
             # Adding task to tasks dictionary
             self.tasks[task.task_id] = task
             return task
@@ -243,8 +273,6 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                 return task
             print(
                 f"[Coordinator {self.server_id}] No tasks available to assign to client {client_id}")
-            print(
-                f"[Coordinator {self.server_id}] Current State: {json.dumps(self.state, indent=2)}")
             return None
 
     def complete_task(self, task_id, client_id, new_file: str):
@@ -261,31 +289,44 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                 print(
                     f"[Coordinator {self.server_id}] Task {task_id} not found.")
                 return
+
             print(
                 f"[Coordinator {self.server_id}] Completing task {task_id} from client {client_id}")
             # Update state based on task type
             if task.task_type == 0:
                 # For prime task
-                self.state['in_progress_prime'].remove(
-                    task.task_files[0])  # Remove from in-progress
-                self.state['completed_prime'].append(
-                    task.task_files[0])  # Add to completed
-                # Add new returned file to pending de-duplication
-                self.state['pending_de_duplication'].append(new_file)
+                if task.task_files[0] not in self.state['in_progress_prime'] or task.task_files[0] in self.state['completed_prime']:
+                    print(
+                        f"[Coordinator {self.server_id}] Task {task_id} already completed or not in progress.")
+                else:
+                    self.state['in_progress_prime'].remove(
+                        task.task_files[0])  # Remove from in-progress
+                    self.state['completed_prime'].append(
+                        task.task_files[0])  # Add to completed
+
             else:
                 # For de-duplication task
-                # Remove both files from in-progress
-                self.state['in_progress_de_duplication'].remove(
-                    task.task_files[0])
-                self.state['in_progress_de_duplication'].remove(
-                    task.task_files[1])
-                # Add both files to completed
-                self.state['completed_de_duplication'].extend(
-                    [task.task_files[0], task.task_files[1]])
+                if (task.task_files[0] not in self.state['in_progress_de_duplication'] or
+                        task.task_files[1] not in self.state['in_progress_de_duplication'] or
+                        task.task_files[0] in self.state['completed_de_duplication'] or
+                        task.task_files[1] in self.state['completed_de_duplication']):
+                    print(
+                        f"[Coordinator {self.server_id}] Task {task_id} already completed or not in progress.")
+                else:
+                    # Remove both files from in-progress
+                    self.state['in_progress_de_duplication'].remove(
+                        task.task_files[0])
+                    self.state['in_progress_de_duplication'].remove(
+                        task.task_files[1])
+                    # Add both files to completed
+                    self.state['completed_de_duplication'].extend(
+                        [task.task_files[0], task.task_files[1]])
 
+            if new_file not in self.state['pending_de_duplication']:
                 # Add new returned file to pending de-duplication
                 self.state['pending_de_duplication'].append(new_file)
-            self.clients[client_id][2] = 0  # Clear assigned task ID
+            # Clear assigned task ID for the client
+            self.clients[client_id][2] = 0
 
     def check_dead_clients_reassign_tasks(self):
         for client_id, (alive_status, last_heartbeat, assigned_task_id) in self.clients.items():
@@ -337,8 +378,8 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                 # Update last heartbeat time
                 self.clients[client_id][1] = time.time()
                 self.clients[client_id][0] = True  # Mark as alive
-                print(
-                    f"[Coordinator {self.server_id}] Heartbeat received from client {client_id}")
+                # print(
+                #     f"[Coordinator {self.server_id}] Heartbeat received from client {client_id}")
 
     def check_primary(self):
         with self.lock:
@@ -368,8 +409,8 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                 filename=task.task_files[0][0],
                 start_index=task.task_files[0][1],
                 end_index=task.task_files[0][2],
-
-                task_id=str(task.task_id)
+                task_id=str(task.task_id),
+                last_task=task.final_task
             )
         elif task.task_type == 1:  # MERGE
             return coordinator_pb2.TaskResponse(
@@ -377,7 +418,8 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                 task_type=coordinator_pb2.TaskType.MERGE,
                 task_id=str(task.task_id),
                 file1=task.task_files[0],
-                file2=task.task_files[1]
+                file2=task.task_files[1],
+                last_task=task.final_task
             )
 
         # Just in case lol
@@ -399,9 +441,307 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
             return
         client_id = request.client_id
         self.update_heartbeat(client_id)
-        return coordinator_pb2.HeartbeatResponse(acknowledged=True)
+        with self.lock:
+            trigger_snapshot = self.clients[client_id][3]
+            if trigger_snapshot:
+                self.clients[client_id][3] = False  # Reset snapshot bool
+                # Start snapshot channel recording
+                self.clients[client_id][4] = True
+            snapshot_marker = self.clients[client_id][4]
+            if snapshot_marker:
+                # Reset snapshot channel recording
+                self.clients[client_id][4] = False
+
+        return coordinator_pb2.HeartbeatResponse(acknowledged=True, trigger_snapshot=trigger_snapshot, snapshot_marker=snapshot_marker)
+
+    # RPC Methods End
+
+    # Functions for snapshot
+    def self_snapshot(self):
+        with self.lock:
+            state = self.get_state()
+            self.snapshot = {
+                "timestamp": time.time(),
+                "coordinator": state,
+                "clients": {}
+            }
+
+    def take_snapshot(self):
+        with self.lock:
+            if int(self.last_snapshot_time - self.server_uptime) < self.snapshot_interval:
+                return
+            self.last_snapshot_time = self.server_uptime
+            self.self_snapshot()
+            self.snapshot_tracker = {}
+            for client_id in self.clients.keys():
+                # If client is alive and snapbool is false
+                if self.clients[client_id][0] and not (self.clients[client_id][3]):
+                    # Set snapbool to true
+                    self.clients[client_id][3] = True
+                    # Snapshot request will be sent during next heartbeat
+                    self.snapshot_tracker[client_id] = False
+            snapshot_start_time = time.time()
+            snapshot_timeout = 30  # seconds
+            current_time = time.time()
+            # wait for all clients to send their snapshot
+            while (not all(self.snapshot_tracker.values())) or (current_time - snapshot_start_time < snapshot_timeout):
+                current_time = time.time()
+                time.sleep(1)
+
+            self.save_snapshot_to_disk()
+            self.upload_snapshot_to_file_server()
+
+    def add_client_snapshot(self, client_id: str, snapshot_data: dict):
+        with self.lock:
+            if client_id in self.clients:
+                self.snapshot["clients"][client_id] = snapshot_data
+
+    def save_snapshot_to_disk(self):
+        with self.lock:
+            snapshot_filename = "snapshot.json"
+            try:
+                with open(snapshot_filename, 'w') as f:
+                    json.dump(self.snapshot, f, indent=4)
+                print(
+                    f"[Coordinator {self.server_id}] Snapshot saved to {snapshot_filename}")
+            except Exception as e:
+                print(
+                    f"[Coordinator {self.server_id}] Failed to save snapshot to disk: {e}")
+
+    def upload_snapshot_to_file_server(self):
+        with self.lock:
+
+            return_value = False
+
+            for fs_address in self.coordinator_addresses:
+                print(
+                    f"[Coordinator {self.server_id}] Uploading snapshot to file server at {fs_address}")
+                try:
+                    fileserver_channel = grpc.insecure_channel(fs_address)
+                    fileserver_stub = fileserver_pb2_grpc.FileServerStub(
+                        fileserver_channel)
+
+                    chunk_iterator = self.stream_upload(
+                        "./snapshot.json", "snapshot.json")
+
+                    response = fileserver_stub.UploadFile(
+                        chunk_iterator, timeout=60.0, wait_for_ready=True)
+
+                    if response.success:
+                        print(
+                            f"[Coordinator {self.server_id}] Successfully uploaded snapshot to {fs_address}")
+                        return_value = True
+                        break
+
+                    # Server may redirect us to the actual primary
+                    redirect_address = response.new_primary_fileserver
+
+                    if redirect_address:
+                        print(
+                            f"[Coordinator {self.server_id}] Redirected to primary file server at {redirect_address}")
+                        fileserver_channel = grpc.insecure_channel(
+                            redirect_address)
+                        fileserver_stub = fileserver_pb2_grpc.FileServerStub(
+                            fileserver_channel)
+
+                        chunk_iterator = self.stream_upload(
+                            "./snapshot.json", "snapshot.json")
+
+                        response = fileserver_stub.UploadFile(
+                            chunk_iterator, timeout=60.0, wait_for_ready=True)
+
+                        if response.success:
+                            print(
+                                f"[Coordinator {self.server_id}] Successfully uploaded snapshot to primary file server at {redirect_address}")
+                            return_value = True
+                            break
+                        else:
+                            print(
+                                f"[Coordinator {self.server_id}] Failed to upload snapshot to primary file server at {redirect_address}")
+                            return_value = False
+
+                except grpc.RpcError as e:
+                    print(
+                        f"[Coordinator {self.server_id}] Failed to upload snapshot to file server at {fs_address}: {e}")
+            try:
+                if fileserver_channel is not None:
+                    fileserver_channel.close()
+            except Exception as e:
+                print(
+                    f"[{self.client_id}] Failed to close connection to the file server")
+
+            return return_value
+
+    def stream_upload(self, filepath: Path, remote_filename: str, chunk_size: int = 65536):
+        """Read local file and generate chunks for upload to file server."""
+        file_size = filepath.stat().st_size
+
+        # Compute checksum
+        checksum = self.compute_checksum(filepath)
+
+        # Send metadata first
+        metadata = fileserver_pb2.FileMetadata(
+            filename=remote_filename,
+            file_size=file_size,
+            checksum=checksum,
+        )
+        yield fileserver_pb2.FileChunk(metadata=metadata)
+
+        # Then send file data in chunks
+        with open(filepath, "rb") as f:
+            while True:
+                chunk_data = f.read(chunk_size)
+                if not chunk_data:
+                    break
+                yield fileserver_pb2.FileChunk(chunk_data=chunk_data)
+
+    def compute_checksum(self, filepath: Path, chunk_size: int = 65536) -> str:
+        """Compute SHA-256 checksum of file."""
+        sha256 = hashlib.sha256()
+        with open(filepath, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+    def get_gloabl_snapshot_from_fs(self):
+        """Returns the latest snapshot of the coordinator server
+
+        Returns:
+            dict: Dictionary containing the snapshot data or None if no snapshot available
+        """
+
+        for fs_address in self.coordinator_addresses:
+            print(
+                f"[Coordinator {self.server_id}] Retrieving snapshot from file server at {fs_address}")
+            try:
+                fileserver_channel = grpc.insecure_channel(fs_address)
+                fileserver_stub = fileserver_pb2_grpc.FileServerStub(
+                    fileserver_channel)
+
+                request = fileserver_pb2.FetchFileRequest(
+                    filename="snapshot.json")
+                chunk_stream = fileserver_stub.FetchFile(request)
+
+                # Save to local cache
+                cached_path = Path("./retrieved_snapshot.json")
+                self.stream_fetch(chunk_stream, cached_path)
+
+            except grpc.RpcError as e:
+                print(
+                    f"[Coordinator {self.server_id}] Failed to retrieve snapshot from file server at {fs_address}")
+
+            try:
+                if fileserver_channel is not None:
+                    fileserver_channel.close()
+            except Exception as e:
+                print(
+                    f"[{self.client_id}] Failed to close connection to the file server")
+
+            try:
+                with open(cached_path, 'r') as f:
+                    snapshot_data = json.load(f)
+                    if snapshot_data.get("coordinator") != None or snapshot_data.get("coordinator") != {}:
+
+                        print(
+                            f"[Coordinator {self.server_id}] Successfully retrieved snapshot from file server at {fs_address}")
+                        return snapshot_data
+
+            except Exception as e:
+                print(
+                    f"[Coordinator {self.server_id}] Failed to load retrieved snapshot from file server at {fs_address}: {e}")
+
+        return None
+
+    def stream_fetch(self, chunk_stream, output_path: Path) -> str:
+        """Receive chunks from file server and write atomically."""
+        tmp_path = Path(str(output_path) + ".tmp")
+
+        try:
+            with open(tmp_path, "wb") as f:
+                for chunk in chunk_stream:
+                    if chunk.HasField("metadata"):
+                        server_checksum = chunk.metadata.checksum
+                    elif chunk.HasField("chunk_data"):
+                        f.write(chunk.chunk_data)
+
+            tmp_path.replace(output_path)
+
+        except Exception as e:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
+            raise e
+
+    # RPC for snapshot
+
+    def SubmitSnapshot(self, request, context):
+        if not self.check_primary():
+            return
+        client_id = request.client_id
+        snapshot_json = request.snapshot_json.decode("utf-8")
+        snapshot_data = json.loads(snapshot_json)
+        self.add_client_snapshot(client_id, snapshot_data)
+        with self.lock:
+            if client_id in self.snapshot_tracker:
+                self.snapshot_tracker[client_id] = True
+        return coordinator_pb2.SnapshotResponse(acknowledged=True)
+
+    # RPC for snapshot  End
 
     # Functions for replica-primary setup
+
+    def get_state(self) -> dict:
+        """Returns the whole state of the coordinator server as a dictionary
+
+        Returns:
+            dict: Dictionary containing the all state data of the coordinator
+        """
+        with self.lock:
+            # Convert Task objects to a serializable format (dictionaries)
+            serializable_tasks = {
+                task_id: task.__dict__ for task_id, task in self.tasks.items()
+            }
+
+            # Prepare the state data for serialization
+            state_data = {
+                "state": self.state,
+                "clients": self.clients,
+                "tasks": serializable_tasks,
+                "task_id_static": Task.task_id_static,
+                "result_filename": self.result_filename,
+                "processing_complete": self.processing_complete,
+            }
+        return state_data
+
+    def restore_state(self, state_data: dict):
+        """Restores the whole state of the coordinator server using the input dictionary
+
+        Args:
+            state_data (dict): Dictionary containing the all state data of the coordinator
+        """
+        with self.lock:
+            # Restore state
+            self.state = state_data["state"]
+            self.clients = state_data["clients"]
+            self.tasks = {}
+            for task_id, task_dict in state_data["tasks"].items():
+                task = Task(
+                    task_dict["client_id"],
+                    task_dict["task_type"],
+                    task_dict["task_files"],
+                    task_dict["task_status"],
+                    task_dict["task_id"],
+                )
+                self.tasks[int(task_id)] = task
+            Task.set_global_taskID(int(state_data["task_id_static"]))
+            self.result_filename = state_data["result_filename"]
+            self.processing_complete = bool(
+                state_data["processing_complete"])
 
     def connect_to_primary(self):
         """Tries to connect to primary, if cannot connect assumes to be primary
@@ -440,7 +780,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                 try:
                     request = coordinator_pb2.InternalHeartbeatRequest()
                     response = self.replica_stub.InternalHeartbeat(
-                        request, timeout=2)
+                        request, timeout=1)
                     if response.acknowledged:
                         print(
                             f"[Coordinator {self.server_id}]  Primary acknowledged heartbeat.")
@@ -461,27 +801,11 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                 try:
                     request = coordinator_pb2.GetFullStateRequest()
                     response = self.replica_stub.GetFullState(
-                        request, timeout=5)
+                        request, timeout=2)
                     state_json = response.state_json.decode("utf-8")
                     state_data = json.loads(state_json)
 
-                    # Restore state
-                    self.state = state_data["state"]
-                    self.clients = state_data["clients"]
-                    self.tasks = {}
-                    for task_id, task_dict in state_data["tasks"].items():
-                        task = Task(
-                            task_dict["client_id"],
-                            task_dict["task_type"],
-                            task_dict["task_files"],
-                            task_dict["task_status"],
-                            task_dict["task_id"],
-                        )
-                        self.tasks[int(task_id)] = task
-                    Task.set_global_taskID(int(state_data["task_id_static"]))
-                    self.result_filename = state_data["result_filename"]
-                    self.processing_complete = bool(
-                        state_data["processing_complete"])
+                    self.restore_state(state_data)
 
                     print(
                         f"[Coordinator {self.server_id}] State synchronized from primary server.")
@@ -493,7 +817,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
         while not self.check_primary():
             self.send_internal_heartbeat()
             self.sync_state_to_primary()
-            # time.sleep(5)
+            time.sleep(1)
 
     # RPC Methods for replica-primary setup
 
@@ -506,20 +830,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
         # Return the full state of the coordinator server as json
         with self.lock:
             if self.primary_server:
-                # Convert Task objects to a serializable format (dictionaries)
-                serializable_tasks = {
-                    task_id: task.__dict__ for task_id, task in self.tasks.items()
-                }
-
-                # Prepare the state data for serialization
-                state_data = {
-                    "state": self.state,
-                    "clients": self.clients,
-                    "tasks": serializable_tasks,
-                    "task_id_static": Task.task_id_static,
-                    "result_filename": self.result_filename,
-                    "processing_complete": self.processing_complete,
-                }
+                state_data = self.get_state()
 
                 # Serialize the state data to a JSON string, then encode to bytes
                 state_json_bytes = json.dumps(state_data).encode("utf-8")
@@ -541,8 +852,9 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
             self.secondary_server_loop()
         try:
             while True:
-                time.sleep(10)
+                time.sleep(1)
                 self.check_dead_clients_reassign_tasks()
+                self.take_snapshot()
         except KeyboardInterrupt:
             print(
                 f"[Coordinator {self.server_id}] Shutting down Coordinator Server...")
@@ -553,12 +865,13 @@ class Task:
 
     task_id_static = 0  # Starts from 0, increments with each new task
 
-    def __init__(self, client_id: str, task_type: str, task_files: list, task_status: int = 0, task_id: int = 0):
+    def __init__(self, client_id: str, task_type: str, task_files: list, task_status: int = 0, task_id: int = 0, final_task: bool = False):
         self.task_id = Task.task_id_static + 1 if task_id == 0 else task_id
         self.client_id = client_id
         self.task_type = task_type  # 0: prime, 1: de-duplication
         self.task_files = task_files
         self.task_status = task_status  # 0: in-progress, 1: completed
+        self.final_task = final_task  # Is this the final task
         Task.task_id_static += 1
 
     def set_global_taskID(task_id: int):
@@ -579,6 +892,10 @@ def main():
                         default=1, help="Unique server ID")
     parser.add_argument("--replica-address", "-r",
                         default=None, help="Replica server address (if any)")
+    parser.add_argument("--snapshot-interval", "-i", type=int,
+                        default=60, help="Snapshot interval in seconds")
+    parser.add_argument("--fileserver-addresses", "-fs", nargs='+',
+                        default=[], help="List of file server addresses")
     args = parser.parse_args()
 
     file_path = Path(args.file_list)
@@ -594,6 +911,8 @@ def main():
         client_response_timeout=args.timeout,
         server_id=args.server_id,
         replica_server_address=args.replica_address,
+        snapshot_interval=args.snapshot_interval,
+        fileserver_addresses=args.fileserver_addresses,
     )
     coordinator_server.initialize()
     coordinator_server.serve()
