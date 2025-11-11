@@ -177,7 +177,7 @@ class Client:
                     self.channel_messages.append({"type": "WARNING", "message": "Message limit reached, further messages dropped"})
 
     def _receive_marker(self):
-        """Handle marker from coordinator and send snapshot to coordinator."""
+        """Send snapshot to coordinator when receive marker."""
         # Prepare snapshot data while holding lock
         with self.snapshot_lock:
             if not self.snapshot_active:
@@ -242,7 +242,7 @@ class Client:
     # =============================== CRASH RECOVERY===============================
     # Simple crash detection - if lock file exists on startup = crashed
     def _generate_alive_lock(self):
-        """Generates an alive lock file to indicate client is running.
+        """Generates alive lock file to indicate client is running.
 
         If alive lock file exists on startup, it means client crashed.
         """
@@ -340,7 +340,7 @@ class Client:
             # Get task stage/type
             try:
                 task_stage_value = snapshot_data.get('task_stage', 'IDLE')
-                # Handle both integer values (backward compatibility) and string names
+                
                 if isinstance(task_stage_value, int):
                     self.process_state.task_stage = TaskStage(task_stage_value)
                 else:
@@ -924,13 +924,13 @@ class Client:
                     print(f"[{self.client_id}] Warning: Heartbeat not acknowledged by coordinator {address}")
                     
                 # ============ SNAPSHOT ============
-                # Handle snapshot trigger
+                # Snapshot trigger
                 if response.trigger_snapshot:
                     self._start_snapshot()
                     with self.snapshot_lock:
                         self.snapshot_coordinator_address = address
                         
-                # Handle snapshot marker
+                # Stop snapshot marker
                 if response.snapshot_marker:
                     self._receive_marker()
                 # ==================================
@@ -1095,7 +1095,7 @@ class Client:
 
                             # Check if file exists before attempting re-upload
                             if not path.exists():
-                                print(f"[{self.client_id}] Error: Output file {output_filename_state} not found in cache")
+                                print(f"[{self.client_id}] Output file {output_filename_state} not found in cache")
                                 print(f"[{self.client_id}] Cannot re-upload, task may need to be reprocessed")
                                 success = False
                             else:
@@ -1156,7 +1156,7 @@ class Client:
                         break
 
                     if task.client_task_status == coordinator_pb2.WAIT:
-                        print(f"[{self.client_id}] Waiting for task dependencies")
+                        print(f"[{self.client_id}] Waiting for task to be available...")
                         current_wait_time = self._apply_backoff(current_wait_time, max_wait_time)
                         continue
 
@@ -1321,7 +1321,7 @@ class Client:
 
 def main():
     """Entry point for client."""
-    parser = argparse.ArgumentParser(description="Distributed System Find Prime - Client")
+    parser = argparse.ArgumentParser(description="AFS Distributed System - Client")
     parser.add_argument("client_id", help="Unique client identifier")
     parser.add_argument("--coordinators", nargs="+", required=True, help="List of coordinator addresses")
     parser.add_argument("--fileservers", nargs="+", required=True, help="List of file server addresses")
