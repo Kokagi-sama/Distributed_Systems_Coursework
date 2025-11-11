@@ -7,6 +7,9 @@ service Coordinator {
     rpc UpdateTaskStatus(TaskStatusRequest) returns (TaskStatusResponse);
 
     rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+    // FOR SNAPSHOT:
+    rpc SubmitSnapshot(SnapshotSubmissionRequest) returns (SnapshotSubmissionResponse);
 }
 
 service CoordinatorInternal {
@@ -47,6 +50,9 @@ message TaskResponse {
     // FOR SPLIT task:
     int64 start_index = 8;
     int64 end_index = 9;
+
+    // For final task:
+    bool last_task = 10;
 }
 
 message TaskStatusRequest {
@@ -68,10 +74,10 @@ message HeartbeatRequest {
 
 message HeartbeatResponse {
     bool acknowledged = 1;
-    
+
     // FOR SNAPSHOT:
     bool trigger_snapshot = 2;
-    string snapshot_id = 3;
+    bool snapshot_marker = 3;
 }
 
 // Messages for Replication
@@ -91,4 +97,23 @@ message GetFullStateRequest {
 // Message to transfer the entire state as a JSON string
 message FullStateResponse {
     bytes state_json = 1;
+}
+
+// FOR SNAPSHOT:
+message SnapshotSubmissionRequest {
+    string client_id = 1;
+
+    // Process states
+    string task_id = 2;
+    string task_stage = 3;
+    int32 progress_percentage = 4;
+    string current_file = 5;
+
+    // Channel messages as JSON string
+    string snapshot_json = 6;
+}
+
+message SnapshotSubmissionResponse {
+    bool acknowledged = 1;
+    string error_message = 2;
 }

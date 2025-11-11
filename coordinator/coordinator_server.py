@@ -16,6 +16,8 @@ if project_root not in sys.path:
 # fmt: off
 from generated import coordinator_pb2 # isort: skip
 from generated import coordinator_pb2_grpc # isort: skip
+from generated import fileserver_pb2 # isort: skip
+from generated import fileserver_pb2_grpc # isort: skip
 # fmt: on
 
 
