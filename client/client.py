@@ -486,14 +486,26 @@ class Client:
         """Receive chunks from file server and write atomically."""
         server_checksum = ""
         tmp_path = Path(str(output_path) + ".tmp")
+        bytes_written = 0
+        chunks_received = 0
 
         try:
             with open(tmp_path, "wb") as f:
                 for chunk in chunk_stream:
                     if chunk.HasField("metadata"):
                         server_checksum = chunk.metadata.checksum
+                        print(f"[DEBUG] Received metadata: filename={chunk.metadata.filename}, size={chunk.metadata.file_size}, checksum={server_checksum}")
                     elif chunk.HasField("chunk_data"):
+                        chunk_size = len(chunk.chunk_data)
                         f.write(chunk.chunk_data)
+                        bytes_written += chunk_size
+                        chunks_received += 1
+
+            print(f"[DEBUG] Finished receiving {output_path.name}: {chunks_received} chunks, {bytes_written} bytes")
+
+            # Check if we actually received any data
+            if bytes_written == 0:
+                raise RuntimeError(f"Received empty file for {output_path.name} (0 bytes written)")
 
             tmp_path.replace(output_path)
             return server_checksum
@@ -544,14 +556,14 @@ class Client:
                     request = fileserver_pb2.FetchRequest(filename=filename)
                     chunk_stream = fileserver_stub.FetchFile(request)
 
-                    # ============ SNAPSHOT ============
-                    # Record right after getting response from fileserver
-                    self._record(RpcType.RESPONSE_FROM_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
-                    # ==================================
-
                     # Save to local cache
                     cached_path = self.cache_dir / Path(filename).name
                     server_checksum = self._stream_fetch(chunk_stream, cached_path)
+
+                    # ============ SNAPSHOT ============
+                    # Record AFTER successfully receiving all chunks from fileserver
+                    self._record(RpcType.RESPONSE_FROM_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
+                    # ==================================
 
                     # Verify checksum if provided by server
                     if server_checksum:
@@ -592,9 +604,9 @@ class Client:
                         except Exception:
                             pass
 
-            # All servers failed this round, wait before retrying
+            # Avoid spamming, exponential backoff after failing to fetch from all servers failed this round
             retry_count += 1
-            backoff_time = min(2 ** retry_count, 30)  # Exponential backoff, max 30 seconds
+            backoff_time = min(2 ** retry_count, 30)
             print(f"[{self.client_id}] All file servers failed for {filename}, retrying in {backoff_time}s (attempt {retry_count})")
             time.sleep(backoff_time)
 
