@@ -717,7 +717,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
         with self.lock:
             if client_id in self.snapshot_tracker:
                 self.snapshot_tracker[client_id] = True
-        return coordinator_pb2.SnapshotResponse(acknowledged=True)
+        return coordinator_pb2.SnapshotSubmissionResponse(acknowledged=True)
 
     # RPC for snapshot  End
 
