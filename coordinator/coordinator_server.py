@@ -491,10 +491,26 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
             snapshot_timeout = 30  # seconds
             current_time = time.time()
             # wait for all clients to send their snapshot
+        # Run the rest of the snapshot process in a separate thread to avoid blocking
+        snapshot_thread = threading.Thread(
+            target=self._wait_and_finalize_snapshot,
+            args=(snapshot_start_time, snapshot_timeout)
+        )
+        snapshot_thread.start()
+
+    def wait_and_finalize_snapshot(self, snapshot_start_time, snapshot_timeout):
+        """
+        Waits for client snapshots, saves the complete snapshot to disk,
+        and uploads it to the file server. This method is intended to be
+        run in a separate thread.
+        """
         print(
             f"[Coordinator {self.server_id}] Waiting for client snapshots...")
-        while (not all(self.snapshot_tracker.values())) or (current_time - snapshot_start_time < snapshot_timeout):
-            current_time = time.time()
+        while not all(self.snapshot_tracker.values()):
+            if time.time() - snapshot_start_time > snapshot_timeout:
+                print(
+                    f"[Coordinator {self.server_id}] Snapshot timed out. Proceeding with available data.")
+                break
             time.sleep(1)
 
         self.save_snapshot_to_disk()
