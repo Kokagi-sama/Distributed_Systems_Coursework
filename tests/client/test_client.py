@@ -1,21 +1,7 @@
 """
-Complete test suite for Client - includes all functional, snapshot, and bug fix tests.
+Complete test suite for Client.
 
-This comprehensive test suite covers:
-- Original functional tests (40 tests)
-- Original snapshot tests (17 tests)
-- Bug fix tests for crash recovery (12 new tests)
-- Edge case tests (8 new tests)
-
-Total: 77 tests
-
-Bug fixes tested:
-1. Task type check in merge recovery (Bug #1)
-2. Merge file parsing validation (Bug #3)
-3. End index default value (Bug #4)
-4. Division by zero in progress (Bug #5)
-5. State reset after failed tasks (Bug #6)
-6. Output filename in completion state (Bug #7)
+Total: 74 tests
 """
 import hashlib
 import json

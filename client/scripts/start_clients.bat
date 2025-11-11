@@ -9,7 +9,7 @@ REM Store the project root path
 set PROJECT_ROOT=%CD%
 
 REM Set your coordinator and fileserver addresses here
-set COORDINATORS=localhost:60051 localhost:60052
+set COORDINATORS=localhost:60061 localhost:60062
 set FILESERVERS=localhost:50051 localhost:50052 localhost:50053
 
 echo Starting 4 client instances...

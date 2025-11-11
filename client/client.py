@@ -1274,7 +1274,7 @@ class Client:
                             self.process_state.progress_percentage = 0
 
                 except KeyboardInterrupt:
-                    print(f"[{self.client_id}] Stopping")
+                    print(f"[{self.client_id}] Stopping...")
                     break
                 except grpc.RpcError as e:
                     code = e.code().name if hasattr(e, "code") else "UNKNOWN"
@@ -1304,17 +1304,17 @@ class Client:
             try:
                 self._stop_heartbeat()
             except Exception as e:
-                print(f"[{self.client_id}] Warning: Error stopping heartbeat: {e}")
+                print(f"[{self.client_id}] Error stopping heartbeat: {e}")
 
             try:
                 self._close_coordinator_channels()
             except Exception as e:
-                print(f"[{self.client_id}] Warning: Error closing channels: {e}")
+                print(f"[{self.client_id}] Error closing channels: {e}")
 
-            try:
-                self._remove_alive_lock()
-            except Exception as e:
-                print(f"[{self.client_id}] Warning: Error removing alive lock: {e}")
+            # try:
+            #     self._remove_alive_lock()
+            # except Exception as e:
+            #     print(f"[{self.client_id}] Warning: Error removing alive lock: {e}")
 
             print(f"[{self.client_id}] Stopped")
 
