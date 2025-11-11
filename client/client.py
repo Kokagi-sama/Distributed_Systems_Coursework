@@ -131,6 +131,7 @@ class Client:
         self.snapshot_lock = threading.Lock()
         self.snapshot_active = False
         self.channel_messages = []  # Simple list of all messages during snapshot
+        self.max_channel_messages = 10000  # Limit to prevent memory exhaustion
         self.process_state = ProcessState()
         # ========================================================================
 
@@ -148,6 +149,7 @@ class Client:
             self.snapshot_active = True
             self.channel_messages = []
 
+            # Atomically read all process state fields while holding lock
             state = {
                 "client_id": self.client_id,
                 "task_id": self.process_state.task_id,
@@ -155,20 +157,30 @@ class Client:
                 "progress": self.process_state.progress_percentage,
                 "file": self.process_state.current_file,
             }
-            print(f"[{self.client_id}] SNAPSHOT: Started - {state}")
+
+        # Print outside the lock to avoid holding it unnecessarily
+        print(f"[{self.client_id}] SNAPSHOT: Started - {state}")
 
     def _record(self, msg_type, **data):
-        """Record messages if snapshot active."""
+        """Record messages if snapshot active, with size limit."""
         with self.snapshot_lock:
             if self.snapshot_active:
-                self.channel_messages.append({"type": msg_type, **data})
+                # Limit message list size to prevent memory exhaustion
+                if len(self.channel_messages) < self.max_channel_messages:
+                    self.channel_messages.append({"type": msg_type, **data})
+                elif len(self.channel_messages) == self.max_channel_messages:
+                    # Log warning once when limit is reached
+                    print(f"[{self.client_id}] Warning: Snapshot message limit ({self.max_channel_messages}) reached")
+                    self.channel_messages.append({"type": "WARNING", "message": "Message limit reached, further messages dropped"})
 
     def _receive_marker(self):
         """Handle marker from coordinator and send snapshot to coordinator."""
+        # Prepare snapshot data while holding lock
         with self.snapshot_lock:
             if not self.snapshot_active:
                 return
 
+            # Atomically copy all snapshot data while holding lock
             snapshot_data = {
                 "client_id": self.client_id,
                 "task_id": self.process_state.task_id,
@@ -179,14 +191,17 @@ class Client:
                 "output_filename": self.process_state.output_filename,
                 "task_start_index": self.process_state.start_index,
                 "task_end_index": self.process_state.end_index,
-                "messages": self.channel_messages
+                "messages": self.channel_messages.copy()  # Copy the list
             }
-            print(f"[{self.client_id}] SNAPSHOT: {json.dumps(snapshot_data, indent=2)}")
 
-            # Send snapshot to coordinator
-            self._submit_snapshot_to_coordinator(snapshot_data)
-
+            # Mark snapshot as inactive before releasing lock
             self.snapshot_active = False
+
+        # Print and send snapshot OUTSIDE the lock to avoid blocking
+        print(f"[{self.client_id}] SNAPSHOT: {json.dumps(snapshot_data, indent=2)}")
+
+        # Send snapshot to coordinator (this can take up to 60s, so do it without holding lock)
+        self._submit_snapshot_to_coordinator(snapshot_data)
 
     def _submit_snapshot_to_coordinator(self, snapshot_data: dict):
         """Client submits snapshot to coordinator.
@@ -194,7 +209,7 @@ class Client:
         Coordinator will compile all client snapshots into snapshot.json and upload to fileserver.
         """
 
-        # Serialize entire snapshot data to JSON string
+        # Serialise the whole snapshot data to a JSON string
         snapshot_json = json.dumps(snapshot_data, indent=2)
 
         request = coordinator_pb2.SnapshotSubmissionRequest(
@@ -222,8 +237,7 @@ class Client:
 
 
     # =============================== CRASH RECOVERY===============================
-    # Simple crash detection using lock file mechanism
-    # If lock file exists on startup = crashed (didn't clean up)
+    # Simple crash detection - if lock file exists on startup = crashed
     def _generate_alive_lock(self):
         """Generates an alive lock file to indicate client is running.
 
@@ -253,7 +267,7 @@ class Client:
         
         - Upon fresh startup, client creates alive lock file
         - When shutdown gracefully, alive lock file is deleted
-        - If alive lock file exists on startup --> client crashed (therefore did not clean up alive lock file)
+        - If alive lock file exists on startup -> client crashed (therefore did not clean up alive lock file)
         - If no alive lock file, it means client has a fresh startup
         """
         print(f"[{self.client_id}] ========== CHECKING IF CLIENT CRASHED ==========")
@@ -309,7 +323,7 @@ class Client:
 
 
     def _restore_from_snapshot(self, snapshot_data: dict):
-        """Restore state from snapshot."""
+        """Restore state from snapshot with validation."""
         print(f"[{self.client_id}] ============ RESTORING FROM SNAPSHOT ============")
         print(f"[{self.client_id}]   Task ID: {snapshot_data.get('task_id', '')}")
         print(f"[{self.client_id}]   Task Type: {snapshot_data.get('task_type', 'IDLE')}")
@@ -319,9 +333,14 @@ class Client:
         print(f"[{self.client_id}] =================================================")
 
         with self.snapshot_lock:
-            self.process_state.task_id = snapshot_data.get('task_id', '')
+            # Get task_id
+            task_id = snapshot_data.get('task_id', '')
+            if not isinstance(task_id, str):
+                print(f"[{self.client_id}] Warning: Invalid task_id type, using empty string")
+                task_id = ''
+            self.process_state.task_id = task_id
 
-            # Restore to task stage
+            # Get task stage/type
             try:
                 task_stage_str = snapshot_data.get('task_stage', 'IDLE')
                 self.process_state.task_stage = TaskStage(task_stage_str)
@@ -329,18 +348,50 @@ class Client:
                 task_type_str = snapshot_data.get('task_type', 'IDLE')
                 self.process_state.task_type = TaskStage(task_type_str)
 
-                self.process_state.start_index = snapshot_data.get('task_start_index', 0)
-                self.process_state.end_index = snapshot_data.get('task_end_index', 0)
-
-                self.process_state.output_filename = snapshot_data.get('output_filename')
-
-            except Exception as e:
-                print(f"[{self.client_id}] Warning: Invalid stage ({e}), resetting")
+            except (ValueError, KeyError) as e:
+                print(f"[{self.client_id}] Warning: Invalid stage/type ({e}), resetting to IDLE")
                 self.process_state.task_stage = TaskStage.IDLE
                 self.process_state.task_type = TaskStage.IDLE
 
-            self.process_state.progress_percentage = snapshot_data.get('progress', 0)
-            self.process_state.current_file = snapshot_data.get('file', '')
+            # Get start and end indices
+            start_index = snapshot_data.get('task_start_index', 0)
+            end_index = snapshot_data.get('task_end_index', 0)
+
+            if not isinstance(start_index, int) or start_index < 0:
+                print(f"[{self.client_id}] Warning: Invalid start_index ({start_index}), using 0")
+                start_index = 0
+
+            if not isinstance(end_index, int) or end_index < 0:
+                print(f"[{self.client_id}] Warning: Invalid end_index ({end_index}), using 0")
+                end_index = 0
+
+            if start_index > end_index:
+                print(f"[{self.client_id}] Warning: start_index > end_index, swapping values")
+                start_index, end_index = end_index, start_index
+
+            self.process_state.start_index = start_index
+            self.process_state.end_index = end_index
+
+            # Get output filename
+            output_filename = snapshot_data.get('output_filename', '')
+            if output_filename and not isinstance(output_filename, str):
+                print(f"[{self.client_id}] Warning: Invalid output_filename type, using empty string")
+                output_filename = ''
+            self.process_state.output_filename = output_filename
+
+            # Get progress
+            progress = snapshot_data.get('progress', 0)
+            if not isinstance(progress, int) or progress < 0 or progress > 100:
+                print(f"[{self.client_id}] Warning: Invalid progress ({progress}), clamping to [0, 100]")
+                progress = max(0, min(100, int(progress) if isinstance(progress, (int, float)) else 0))
+            self.process_state.progress_percentage = progress
+
+            # Get current file
+            current_file = snapshot_data.get('file', '')
+            if not isinstance(current_file, str):
+                print(f"[{self.client_id}] Warning: Invalid file type, using empty string")
+                current_file = ''
+            self.process_state.current_file = current_file
 
         print(f"[{self.client_id}] State restored successfully")
     # =====================================================================
@@ -380,15 +431,18 @@ class Client:
         return addresses[(i + 1) % len(addresses)]
 
     def _compute_checksum(self, filepath: Path, chunk_size: int = 65536) -> str:
-        """Compute SHA-256 checksum of file."""
-        sha256 = hashlib.sha256()
-        with open(filepath, "rb") as f:
-            while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                sha256.update(chunk)
-        return sha256.hexdigest()
+        """Compute SHA-256 checksum of file with error handling."""
+        try:
+            sha256 = hashlib.sha256()
+            with open(filepath, "rb") as f:
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    sha256.update(chunk)
+            return sha256.hexdigest()
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            raise RuntimeError(f"Failed to compute checksum for {filepath}: {e}") from e
 
     def _stream_upload(self, filepath: Path, remote_filename: str, chunk_size: int = 65536):
         """Read local file and generate chunks for upload to file server."""
@@ -451,11 +505,12 @@ class Client:
 
         last_error = None
         for fileserver_address in servers:
+            fileserver_channel = None
             try:
                 print(f"[{self.client_id}] Fetching {filename} from {fileserver_address}")
                 
                 # ============ SNAPSHOT ============
-                # Record before sending request to fileserver
+                # Record right firing request
                 self._record(RpcType.REQUEST_TO_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
                 
                 # Update task stage and start with 0 progress
@@ -467,20 +522,19 @@ class Client:
                 
                 fileserver_channel = grpc.insecure_channel(fileserver_address)
                 fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
-
-                # Request file via RPC
+                
                 request = fileserver_pb2.FetchRequest(filename=filename)
                 chunk_stream = fileserver_stub.FetchFile(request)
                 
                 # ============ SNAPSHOT ============
-                # Record after getting response from fileserver
+                # Record right after getting response from fileserver
                 self._record(RpcType.RESPONSE_FROM_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
                 # ==================================
-
+                
                 # Save to local cache
                 cached_path = self.cache_dir / Path(filename).name
                 server_checksum = self._stream_fetch(chunk_stream, cached_path)
-
+                
                 # Verify checksum if provided by server
                 if server_checksum:
                     computed_checksum = self._compute_checksum(cached_path)
@@ -500,7 +554,7 @@ class Client:
                 # ==================================
                 
                 return cached_path
-
+            
             except Exception as e:
                 print(f"[{self.client_id}] Failed to fetch from {fileserver_address}: {e}")
                 last_error = e
@@ -513,6 +567,14 @@ class Client:
                 
                 continue
             
+            finally:
+                # Always close the channel to prevent resource leaks
+                if fileserver_channel is not None:
+                    try:
+                        fileserver_channel.close()
+                    except Exception:
+                        pass
+                    
         raise RuntimeError(f"Failed to fetch {filename} from all file servers: {last_error}")
 
     def _build_server_rotation_list(self, preferred_address, all_addresses):
@@ -562,11 +624,11 @@ class Client:
         current_fileserver_address = servers[idx]
         backoff = 1.0
         max_backoff = 30.0
-
+        
         while True:
             print(f"[{self.client_id}] Uploading {remote_filename} to {current_fileserver_address}")
             fileserver_channel = None
-
+            
             try:
                 fileserver_channel = grpc.insecure_channel(current_fileserver_address)
                 fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
@@ -580,17 +642,17 @@ class Client:
                     self.process_state.task_stage = TaskStage.UPLOAD
                     self.process_state.progress_percentage = 0
                 # ==================================
-
+                
                 # Create fresh iterator for each attempt
                 chunk_iterator = self._stream_upload(local_filepath, remote_filename)
-
+                
                 response = fileserver_stub.UploadFile(chunk_iterator, timeout=60.0, wait_for_ready=True)
                 
                 # ============ SNAPSHOT ============
                 # Record after getting response from fileserver
                 self._record(RpcType.RESPONSE_FROM_FILESERVER_UPLOAD.value, file=remote_filename, server=current_fileserver_address)
                 # ==================================
-
+                
                 if response.success:
                     print(f"[{self.client_id}] Successfully uploaded {remote_filename} to {current_fileserver_address}")
                     
@@ -599,7 +661,7 @@ class Client:
                         self.process_state.progress_percentage = 100
                     # ==================================
                     return True
-
+                
                 print(f"[{self.client_id}] Upload to {current_fileserver_address} failed: {response.error_message}")
                 
                 # ============ SNAPSHOT ============
@@ -607,11 +669,11 @@ class Client:
                     self.process_state.task_stage = TaskStage.UPLOAD_ERROR
                     self.process_state.progress_percentage = 0
                 # ==================================
-
+                
                 # Server may redirect us to the actual primary
                 redirect_address = response.new_primary_fileserver
                 new_servers, new_idx, new_addr, new_backoff = (self._handle_upload_redirect(redirect_address, current_fileserver_address))
-
+                
                 if new_servers is not None:
                     servers = new_servers
                     idx = new_idx
@@ -622,7 +684,7 @@ class Client:
                     idx, current_fileserver_address, reset_backoff = (self._rotate_to_next_server(servers, idx, current_fileserver_address))
                     if reset_backoff is not None:
                         backoff = reset_backoff
-
+                        
             except grpc.RpcError as e:
                 code = e.code().name if hasattr(e, "code") else "UNKNOWN"
                 print(f"[{self.client_id}] RPC error to {current_fileserver_address}: {code}, {e}")
@@ -635,7 +697,7 @@ class Client:
                     self.process_state.task_stage = TaskStage.UPLOAD_ERROR
                     self.process_state.progress_percentage = 0
                 # ==================================
-
+                
             except Exception as e:
                 print(f"[{self.client_id}] Upload error to {current_fileserver_address}: {e}")
                 backoff = self._apply_backoff(backoff, max_backoff)
@@ -647,7 +709,7 @@ class Client:
                     self.process_state.task_stage = TaskStage.UPLOAD_ERROR
                     self.process_state.progress_percentage = 0
                 # ==================================
-
+                
             finally:
                 try:
                     if fileserver_channel is not None:
@@ -677,16 +739,16 @@ class Client:
             # ==================================
             
             return False, ""
-
+        
         # ============ SNAPSHOT ============
         with self.snapshot_lock:
             self.process_state.task_stage = TaskStage.FIND_PRIMES
             self.process_state.current_file = filename
             self.process_state.progress_percentage = 0
         # ==================================
-
+        
         print(f"[{self.client_id}] Started processing {filename} from line {start_index} to {end_index - 1}")
-
+        
         # Find and deduplicate primes
         primes = set()
 
@@ -695,11 +757,11 @@ class Client:
                 # Skip lines before start_index
                 if line_num < start_index:
                     continue
-
+                
                 # Stop when reaching end_index
                 if line_num >= end_index:
                     break
-
+                
                 # ============ SNAPSHOT ============
                 # Update progress every 100 lines
                 if (line_num - start_index) % 100 == 0 and end_index - start_index > 0:
@@ -707,35 +769,35 @@ class Client:
                         with self.snapshot_lock:
                             self.process_state.progress_percentage = min(progress, 99)
                 # ==================================
-
+                
                 line = line.strip()
                 if not line:
                     continue
-
+                
                 try:
                     num = int(line)
-
+                    
                     if isprime(num):
                         primes.add(num)
                 except ValueError:
                     print(f"[{self.client_id}] Warning: Invalid number on line {line_num + 1}: {line}")
                     continue
-
+                
         print(f"[{self.client_id}] Finished processing {filename}: found {len(primes):,} unique primes from line {start_index} to {end_index - 1}")
-
+        
         # Write sorted primes atomically
         result_filename = (f"{Path(filename).stem}_range_{start_index}_{end_index}_primes.txt")
         result_path = self.cache_dir / result_filename
         tmp_path = Path(str(result_path) + ".tmp")
-
+        
         try:
             with open(tmp_path, "w") as f:
                 for prime in sorted(primes):
                     f.write(f"{prime}\n")
-
+                    
             tmp_path.replace(result_path)
             print(f"[{self.client_id}] Wrote deduplicated primes to {result_filename}")
-
+            
             # Upload result to primary file server
             success = self._upload_file(result_path, result_filename, primary_fileserver_addr)
             
@@ -747,7 +809,7 @@ class Client:
             # ==================================
             
             return success, result_filename
-
+        
         except Exception as e:
             if tmp_path.exists():
                 try:
@@ -778,36 +840,36 @@ class Client:
             self.process_state.task_stage = TaskStage.MERGE
             self.process_state.current_file = f"{file1},{file2}"
         # ==================================
-
+        
         merged_filename = "primes.txt" if last_task else f"merged_{task_id}.txt"
         merged_path = self.cache_dir / merged_filename
         tmp_path = Path(f"{str(merged_path)}.tmp")
-
+        
         try:
             # Download both files from file server
             path1 = self._fetch_file(file1)
             path2 = self._fetch_file(file2)
-
+            
             # Merge and deduplicate primes
             primes = set()
-
+            
             for filepath in [path1, path2]:
                 with open(filepath, "r") as f:
                     for line in f:
                         line = line.strip()
                         if line:
                             primes.add(int(line))
-
+                            
             print(f"[{self.client_id}] Finished merging: {len(primes):,} unique primes total")
-
+            
             # Write sorted merged result atomically
             with open(tmp_path, "w") as f:
                 for prime in sorted(primes):
                     f.write(f"{prime}\n")
-
+                    
             tmp_path.replace(merged_path)
             print(f"[{self.client_id}] Wrote merged result to {merged_filename}")
-
+            
             # Upload result to primary file server
             success = self._upload_file(merged_path, merged_filename, primary_fileserver_addr)
             
@@ -819,7 +881,7 @@ class Client:
             # ==================================
             
             return success, merged_filename
-
+        
         except Exception as e:
             if tmp_path.exists():
                 try:
@@ -827,7 +889,7 @@ class Client:
                 except Exception:
                     pass
             print(f"[{self.client_id}] Merge error: {e}")
-
+            
             # ============ SNAPSHOT ============
             with self.snapshot_lock:
                 self.process_state.task_stage = TaskStage.MERGE_ERROR
@@ -844,7 +906,7 @@ class Client:
                 coordinator_stub = self._get_coordinator_stub(address)
                 request = coordinator_pb2.HeartbeatRequest(client_id=self.client_id)
                 response = coordinator_stub.SendHeartbeat(request)
-
+                
                 if not response.acknowledged:
                     print(f"[{self.client_id}] Warning: Heartbeat not acknowledged by coordinator {address}")
                     
@@ -854,22 +916,22 @@ class Client:
                     self._start_snapshot()
                     with self.snapshot_lock:
                         self.snapshot_coordinator_address = address
-
+                        
                 # Handle snapshot marker
                 if response.snapshot_marker:
                     self._receive_marker()
                 # ==================================
-
+                
             except grpc.RpcError as e:
                 print(f"[{self.client_id}] Heartbeat error to {address}: {e}")
-
+                
             time.sleep(self.heartbeat_interval)
 
     def _start_heartbeat(self, address):
         """Start background thread to send heartbeats to coordinator."""
         if (address in self.heartbeat_threads and self.heartbeat_threads[address].is_alive()):
             return
-
+        
         thread = threading.Thread(
             target=self._heartbeat_loop,
             args=(address,),
@@ -898,7 +960,7 @@ class Client:
         # Send heartbeat to all coordinators
         for address in self.coordinator_addresses:
             self._start_heartbeat(address)
-
+            
         # Find first responsive coordinator or default to first
         current_coordinator = self.coordinator_addresses[0]
         for address in self.coordinator_addresses:
@@ -912,12 +974,12 @@ class Client:
             except Exception:
                 # Try next coordinator
                 continue
-
+            
         # Backoff settings for waiting and retries
         base_wait_time = 5
         max_wait_time = 60
         current_wait_time = base_wait_time
-
+        
         # ==================== CRASH DETECTION AND RECOVERY ====================
         # Check for alive lock (this indicates previous crash)
         # If crashed, download snapshot.json from fileserver and restore
@@ -929,15 +991,15 @@ class Client:
             print(f"[{self.client_id}] Recovered states from previous crash using global snapshot")
             print(f"[{self.client_id}] ==========================================================")
 
-            # Read process state with lock
+            # Atomically read all process state fields with lock and create immutable copies
             with self.snapshot_lock:
                 task_stage = self.process_state.task_stage
                 task_type = self.process_state.task_type
-                task_id = self.process_state.task_id
-                current_file = self.process_state.current_file
-                start_index = self.process_state.start_index
-                end_index = self.process_state.end_index
-                output_filename_state = self.process_state.output_filename
+                task_id = str(self.process_state.task_id)  # Create immutable copy
+                current_file = str(self.process_state.current_file)  # Create immutable copy
+                start_index = int(self.process_state.start_index)  # Create immutable copy
+                end_index = int(self.process_state.end_index)  # Create immutable copy
+                output_filename_state = str(self.process_state.output_filename) if self.process_state.output_filename else ""
 
             if task_stage != TaskStage.IDLE:
                 try:
@@ -1225,12 +1287,21 @@ class Client:
 
         finally:
             # Always cleanup, even if an exception occurs
-            # Stop heartbeat thread
-            self._stop_heartbeat()
-            self._close_coordinator_channels()
+            # Each cleanup operation is wrapped to ensure all cleanup happens
+            try:
+                self._stop_heartbeat()
+            except Exception as e:
+                print(f"[{self.client_id}] Warning: Error stopping heartbeat: {e}")
 
-            # Remove alive lock file
-            self._remove_alive_lock()
+            try:
+                self._close_coordinator_channels()
+            except Exception as e:
+                print(f"[{self.client_id}] Warning: Error closing channels: {e}")
+
+            try:
+                self._remove_alive_lock()
+            except Exception as e:
+                print(f"[{self.client_id}] Warning: Error removing alive lock: {e}")
 
             print(f"[{self.client_id}] Stopped")
 
