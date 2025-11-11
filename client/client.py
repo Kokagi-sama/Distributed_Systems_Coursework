@@ -483,7 +483,7 @@ class Client:
                 yield fileserver_pb2.FileChunk(chunk_data=chunk_data)
 
     def _stream_fetch(self, chunk_stream, output_path: Path) -> str:
-        """Receive chunks from file server and write atomically."""
+        """Receive file data in batch from file server and write atomically."""
         server_checksum = ""
         tmp_path = Path(str(output_path) + ".tmp")
         bytes_written = 0
@@ -526,10 +526,8 @@ class Client:
             print(f"[{self.client_id}] Using local {filename}")
             return local_path
 
-        # Keep trying until we succeed (at least one file server should always be alive)
         retry_count = 0
         while True:
-            # Try file servers in random order for load balancing
             servers = self.fileserver_addresses.copy()
             random.shuffle(servers)
 
@@ -540,7 +538,7 @@ class Client:
                     print(f"[{self.client_id}] Fetching {filename} from {fileserver_address}")
 
                     # ============ SNAPSHOT ============
-                    # Record right firing request
+                    # Record right before firing request
                     self._record(RpcType.REQUEST_TO_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
 
                     # Update task stage and start with 0 progress

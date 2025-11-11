@@ -169,7 +169,8 @@ def mock_fileserver(fetch_file=None, upload_success=True):
         filename = fetch_file.get("filename", "test.txt")
         content = fetch_file.get("content", b"")
         checksum = fetch_file.get("checksum")
-        stub.FetchFile.return_value = create_fetch_chunks(filename, content, checksum)
+        # Use side_effect with lambda to create fresh iterator on each call
+        stub.FetchFile.side_effect = lambda req: create_fetch_chunks(filename, content, checksum)
 
     if upload_success:
         capture_upload, uploaded_data = create_upload_capturer()
@@ -182,6 +183,8 @@ def mock_fileserver(fetch_file=None, upload_success=True):
     patches.enter_context(
         patch("generated.fileserver_pb2_grpc.FileServerStub", return_value=stub)
     )
+    # Always patch time.sleep to prevent tests from hanging in retry loops
+    patches.enter_context(patch("time.sleep"))
 
     result["channel"] = channel
     result["patches"] = patches
@@ -645,28 +648,44 @@ def test_fetch_failover_on_server_error(client, temp_test_file):
 
 
 def test_fetch_detects_checksum_mismatch(client, temp_test_file):
-    """Test that fetch detects checksum mismatch and raises error."""
+    """Test that fetch detects checksum mismatch and retries indefinitely."""
     file_content = temp_test_file.read_bytes()
 
-    # Use wrong checksum
+    # Use wrong checksum - will fail on all servers
     wrong_checksum = "a" * 64
 
     mock_stub = MagicMock()
-    mock_stub.FetchFile.side_effect = lambda _: create_fetch_chunks(
-        "test_numbers.txt", file_content, wrong_checksum
-    )
+    call_count = 0
+    max_attempts = 3  # Limit attempts to avoid hanging
+
+    def mock_fetch(_):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= max_attempts * len(client.fileserver_addresses):
+            # After max attempts, succeed to break the retry loop
+            correct_checksum = hashlib.sha256(file_content).hexdigest()
+            return create_fetch_chunks("test_numbers.txt", file_content, correct_checksum)
+        # Keep failing with wrong checksum
+        return create_fetch_chunks("test_numbers.txt", file_content, wrong_checksum)
+
+    mock_stub.FetchFile.side_effect = mock_fetch
+    sleep_times = []
 
     with patch("grpc.insecure_channel"):
         with patch(
             "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
         ):
-            # Should raise RuntimeError after all servers fail checksum
-            try:
-                client._fetch_file("test_numbers.txt")
-                assert False, "Expected RuntimeError for checksum mismatch"
-            except RuntimeError as e:
-                assert "Failed to fetch" in str(e)
-                assert "from all file servers" in str(e)
+            with patch("time.sleep", side_effect=lambda s: sleep_times.append(s)):
+                # Should retry with backoff when all servers fail checksum
+                cached_path = client._fetch_file("test_numbers.txt")
+
+    # Verify it retried multiple times
+    assert call_count >= len(client.fileserver_addresses)  # At least one full round
+    # Verify exponential backoff occurred
+    assert len(sleep_times) > 0
+    assert sleep_times[0] == 2  # First backoff: 2^1 seconds
+    # Verify it eventually succeeded
+    assert cached_path.exists()
 
 
 def test_no_tmp_files_after_successful_fetch(client, test_cache_dir):
@@ -1989,8 +2008,9 @@ def test_process_file_overwrites_existing_result(client, test_cache_dir):
     existing_result.write_text("old primes from previous run")
 
     test_content = b"2\n3\n5\n7\n11\n13\n17\n19\n23\n29\n31\n37\n41\n43\n47\n53\n"
+    checksum = hashlib.sha256(test_content).hexdigest()
     mock = mock_fileserver(
-        fetch_file={"filename": "test_numbers.txt", "content": test_content, "checksum": "abc123"},
+        fetch_file={"filename": "test_numbers.txt", "content": test_content, "checksum": checksum},
         upload_success=True
     )
 
@@ -2024,7 +2044,7 @@ def test_merge_files_overwrites_existing_result(client, test_cache_dir):
     mock = mock_fileserver(upload_success=True)
 
     with mock["patches"]:
-        success = client.merge_files(
+        success, _ = client.merge_files(
             "primes1.txt", "primes2.txt", "task123", "localhost:50052", False
         )
 
