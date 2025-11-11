@@ -369,7 +369,7 @@ def test_merge_files(client):
             "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
         ):
             success, output_filename = client.merge_files(
-                "file1_primes.txt", "file2_primes.txt", "task123", "localhost:50052"
+                "file1_primes.txt", "file2_primes.txt", "task123", "localhost:50052", False
             )
 
     result_data = b"".join(
@@ -379,6 +379,57 @@ def test_merge_files(client):
 
     assert success is True
     assert output_filename == "merged_task123.txt"
+    assert result_numbers == [2, 3, 5, 7, 11, 13]
+    assert mock_stub.FetchFile.call_count == 2
+    assert mock_stub.UploadFile.call_count == 1
+
+
+def test_merge_files_with_last_task_true(client):
+    """Test merging files with last_task=True produces 'primes.txt'."""
+    file1_content = b"2\n3\n5\n7\n"
+    file2_content = b"5\n7\n11\n13\n"
+
+    capture_upload, uploaded_data = create_upload_capturer()
+
+    fetch_chunks1 = [
+        fileserver_pb2.FileChunk(
+            metadata=fileserver_pb2.FileMetadata(
+                filename="file1_primes.txt", file_size=len(file1_content)
+            )
+        ),
+        fileserver_pb2.FileChunk(chunk_data=file1_content),
+    ]
+
+    fetch_chunks2 = [
+        fileserver_pb2.FileChunk(
+            metadata=fileserver_pb2.FileMetadata(
+                filename="file2_primes.txt", file_size=len(file2_content)
+            )
+        ),
+        fileserver_pb2.FileChunk(chunk_data=file2_content),
+    ]
+
+    mock_stub = MagicMock()
+    mock_stub.FetchFile.side_effect = [iter(fetch_chunks1), iter(fetch_chunks2)]
+    mock_stub.UploadFile.side_effect = capture_upload
+
+    mock_channel = MagicMock()
+    with patch("grpc.insecure_channel", return_value=mock_channel):
+        with patch(
+            "generated.fileserver_pb2_grpc.FileServerStub", return_value=mock_stub
+        ):
+            success, output_filename = client.merge_files(
+                "file1_primes.txt", "file2_primes.txt", "final_task", "localhost:50052", True
+            )
+
+    result_data = b"".join(
+        chunk.chunk_data for chunk in uploaded_data if chunk.HasField("chunk_data")
+    )
+    result_numbers = [int(line) for line in result_data.decode().strip().split("\n")]
+
+    assert success is True
+    # Key assertion: when last_task=True, output should be "primes.txt"
+    assert output_filename == "primes.txt"
     assert result_numbers == [2, 3, 5, 7, 11, 13]
     assert mock_stub.FetchFile.call_count == 2
     assert mock_stub.UploadFile.call_count == 1
@@ -508,7 +559,7 @@ def test_merge_files_cleans_tmp_on_error(client, test_cache_dir):
             # Mock upload to fail
             with patch.object(client, "_upload_file", return_value=False):
                 success, output_filename = client.merge_files(
-                    "file1_primes.txt", "file2_primes.txt", "task123", "localhost:50052"
+                    "file1_primes.txt", "file2_primes.txt", "task123", "localhost:50052", False
                 )
 
     assert success is False
@@ -1178,7 +1229,7 @@ def test_process_state_during_merge(client):
         client._start_snapshot()
 
         # Perform merge
-        success, output = client.merge_files("file1.txt", "file2.txt", "task_merge", "localhost:50052")
+        success, output = client.merge_files("file1.txt", "file2.txt", "task_merge", "localhost:50052", False)
 
         # Check state
         assert success is True
@@ -1479,7 +1530,7 @@ def test_crash_recovery_merge_task_type_check(client, test_cache_dir):
             if task_stage in (TaskStage.DOWNLOAD, TaskStage.DOWNLOAD_ERROR):
                 if task_type in (TaskStage.MERGE, TaskStage.MERGE_ERROR) and current_file:
                     files = current_file.split(',')
-                    client.merge_files(files[0], files[1], "merge_123", "localhost:50052")
+                    client.merge_files(files[0], files[1], "merge_123", "localhost:50052", False)
 
     # Verify merge_files was called (Bug fix working)
     mock_merge.assert_called_once()
@@ -1871,7 +1922,7 @@ def test_merge_with_duplicate_primes(client):
     mocks["stub"].UploadFile.side_effect = capture_upload
 
     with mocks["patches"]:
-        success, output = client.merge_files("file1.txt", "file2.txt", "dup_test", "localhost:50052")
+        success, output = client.merge_files("file1.txt", "file2.txt", "dup_test", "localhost:50052", False)
 
     assert success is True
 
@@ -1988,7 +2039,7 @@ def test_merge_files_overwrites_existing_result(client, test_cache_dir):
 
     with mock["patches"]:
         success = client.merge_files(
-            "primes1.txt", "primes2.txt", "task123", "localhost:50052"
+            "primes1.txt", "primes2.txt", "task123", "localhost:50052", False
         )
 
     assert success

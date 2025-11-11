@@ -771,7 +771,7 @@ class Client:
             return False, ""
 
     def merge_files(
-        self, file1: str, file2: str, task_id: str, primary_fileserver_addr: str
+        self, file1: str, file2: str, task_id: str, primary_fileserver_addr: str, last_task: bool
     ) -> tuple[bool, str]:
         """Download two deduplicated files, merge them, and upload result to file server."""
         print(f"[{self.client_id}] Started merge task: {task_id}")
@@ -784,9 +784,9 @@ class Client:
             self.process_state.current_file = f"{file1},{file2}"
         # ==================================
 
-        merged_filename = f"merged_{task_id}.txt"
+        merged_filename = "primes.txt" if last_task else f"merged_{task_id}.txt"
         merged_path = self.cache_dir / merged_filename
-        tmp_path = Path(str(merged_path) + ".tmp")
+        tmp_path = Path(f"{str(merged_path)}.tmp")
 
         try:
             # Download both files from file server
@@ -967,6 +967,7 @@ class Client:
                                 file2,
                                 task_id,
                                 self.fileserver_addresses[0],
+                                False,
                             )
                             
                         elapsed = time.time() - start_time
@@ -1111,6 +1112,7 @@ class Client:
                     print(f"[{self.client_id}]   File 1: {task.file1}")
                     print(f"[{self.client_id}]   File 2: {task.file2}")
                     print(f"[{self.client_id}]   Primary server: {self.fileserver_addresses[0]}")
+                    print(f"[{self.client_id}]   Last Task: {task.last_task}")
 
                     # Set task_type for snapshot
                     with self.snapshot_lock:
@@ -1121,6 +1123,7 @@ class Client:
                         task.file2,
                         task.task_id,
                         self.fileserver_addresses[0],
+                        task.last_task,
                     )
                     task_id = task.task_id
 
