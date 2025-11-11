@@ -33,19 +33,22 @@ from generated import (
 
 
 class TaskStage(Enum):
-    """Enums for stages of task used for client's state to facilitate snapshot."""
-    IDLE = "IDLE"
-    DOWNLOAD = "DOWNLOAD"
-    UPLOAD = "UPLOAD"
-    FIND_PRIMES = "FIND_PRIMES"
-    MERGE = "MERGE"
-    COMPLETED = "COMPLETED"
+    """Enums for stages of task used for client's state to facilitate snapshot.
+
+    Note: FIND_PRIMES and MERGE values align with coordinator.proto TaskType enum.
+    """
+    IDLE = -1
+    DOWNLOAD = 2
+    UPLOAD = 3
+    FIND_PRIMES = 0
+    MERGE = 1
+    COMPLETED = 4
 
     # Error enums at various stage
-    DOWNLOAD_ERROR = "DOWNLOAD_ERROR"
-    UPLOAD_ERROR = "UPLOAD_ERROR"
-    FIND_PRIMES_ERROR = "FIND_PRIMES_ERROR"
-    MERGE_ERROR = "MERGE_ERROR"
+    DOWNLOAD_ERROR = 5
+    UPLOAD_ERROR = 6
+    FIND_PRIMES_ERROR = 7
+    MERGE_ERROR = 8
 
 
 class RpcType(Enum):
@@ -90,7 +93,7 @@ class Client:
         coordinator_addresses: list[str],
         fileserver_addresses: list[str],
         cache_dir: str = "./client_cache",
-        heartbeat_interval: int = 0.5,
+        heartbeat_interval: int = 5,
     ):
         self.client_id = client_id
 
@@ -923,7 +926,8 @@ class Client:
                 # ==================================
                 
             except grpc.RpcError as e:
-                print(f"[{self.client_id}] Heartbeat error to {address}: {e}")
+                print(f"[{self.client_id}] Heartbeat error to {address}")
+                pass
                 
             time.sleep(self.heartbeat_interval)
 
