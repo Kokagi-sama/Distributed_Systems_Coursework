@@ -4,8 +4,13 @@ import random
 import threading
 import time
 import json
+import sys
 from enum import Enum
 from pathlib import Path
+
+# Add parent directory to path so we can import from 'generated'
+# This allows running the script from anywhere: python client/client.py
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import grpc
 from sympy import isprime
@@ -221,12 +226,13 @@ class Client:
     # If lock file exists on startup = crashed (didn't clean up)
     def _generate_alive_lock(self):
         """Generates an alive lock file to indicate client is running.
-        
+
         If alive lock file exists on startup, it means client crashed.
         """
         try:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
             with open(self.alive_lock_file, "w") as f:
-                f.write(f"Client {self.client_id} started at {time.time()}\n")
+                f.write(f"Client {self.client_id} started at {timestamp}\n")
             print(f"[{self.client_id}] Created alive lock")
         except Exception as e:
             print(f"[{self.client_id}] Warning: Could not create alive lock: {e}")
@@ -420,7 +426,7 @@ class Client:
                     elif chunk.HasField("chunk_data"):
                         f.write(chunk.chunk_data)
 
-            tmp_path.rename(output_path)
+            tmp_path.replace(output_path)
             return server_checksum
 
         except Exception as e:
@@ -732,7 +738,7 @@ class Client:
                 for prime in sorted(primes):
                     f.write(f"{prime}\n")
 
-            tmp_path.rename(result_path)
+            tmp_path.replace(result_path)
             print(f"[{self.client_id}] Wrote deduplicated primes to {result_filename}")
 
             # Upload result to primary file server
@@ -804,7 +810,7 @@ class Client:
                 for prime in sorted(primes):
                     f.write(f"{prime}\n")
 
-            tmp_path.rename(merged_path)
+            tmp_path.replace(merged_path)
             print(f"[{self.client_id}] Wrote merged result to {merged_filename}")
 
             # Upload result to primary file server
