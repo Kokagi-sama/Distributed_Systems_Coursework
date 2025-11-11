@@ -90,7 +90,7 @@ class Client:
         coordinator_addresses: list[str],
         fileserver_addresses: list[str],
         cache_dir: str = "./client_cache",
-        heartbeat_interval: int = 5,
+        heartbeat_interval: int = 0.5,
     ):
         self.client_id = client_id
 
