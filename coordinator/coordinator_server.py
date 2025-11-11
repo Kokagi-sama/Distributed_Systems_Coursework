@@ -468,8 +468,12 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
 
     def take_snapshot(self):
         with self.lock:
-            if int(self.last_snapshot_time - self.server_uptime) < self.snapshot_interval:
+            # print(f"[Coordinator {self.server_id}] self.last_snapshot_time: {self.last_snapshot_time} server_uptime: {self.server_uptime} snapshot_interval: {self.snapshot_interval} interval check: {int(self.last_snapshot_time - self.server_uptime)}")
+
+            if int(self.server_uptime - self.last_snapshot_time) < self.snapshot_interval:
                 return
+            print(
+                f"[Coordinator {self.server_id}] Taking snapshot")
             self.last_snapshot_time = self.server_uptime
             self.self_snapshot()
             self.snapshot_tracker = {}
@@ -484,12 +488,17 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
             snapshot_timeout = 30  # seconds
             current_time = time.time()
             # wait for all clients to send their snapshot
-            while (not all(self.snapshot_tracker.values())) or (current_time - snapshot_start_time < snapshot_timeout):
-                current_time = time.time()
-                time.sleep(1)
+        print(
+            f"[Coordinator {self.server_id}] Waiting for client snapshots...")
+        while (not all(self.snapshot_tracker.values())) or (current_time - snapshot_start_time < snapshot_timeout):
+            current_time = time.time()
+            time.sleep(1)
 
-            self.save_snapshot_to_disk()
-            self.upload_snapshot_to_file_server()
+        self.save_snapshot_to_disk()
+        print(
+            f"[Coordinator {self.server_id}] Uploading snapshot to file server...")
+        self.upload_snapshot_to_file_server()
+        print(f"[Coordinator {self.server_id}] Snapshot process completed.")
 
     def add_client_snapshot(self, client_id: str, snapshot_data: dict):
         with self.lock:
@@ -522,7 +531,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                         fileserver_channel)
 
                     chunk_iterator = self.stream_upload(
-                        "./snapshot.json", "snapshot.json")
+                        Path("./snapshot.json"), "snapshot.json")
 
                     response = fileserver_stub.UploadFile(
                         chunk_iterator, timeout=60.0, wait_for_ready=True)
@@ -545,7 +554,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                             fileserver_channel)
 
                         chunk_iterator = self.stream_upload(
-                            "./snapshot.json", "snapshot.json")
+                            Path("./snapshot.json"), "snapshot.json")
 
                         response = fileserver_stub.UploadFile(
                             chunk_iterator, timeout=60.0, wait_for_ready=True)
@@ -621,7 +630,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                 fileserver_stub = fileserver_pb2_grpc.FileServerStub(
                     fileserver_channel)
 
-                request = fileserver_pb2.FetchFileRequest(
+                request = fileserver_pb2.FetchRequest(
                     filename="snapshot.json")
                 chunk_stream = fileserver_stub.FetchFile(request)
 
@@ -853,6 +862,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
         try:
             while True:
                 time.sleep(1)
+                self.server_uptime = time.time()
                 self.check_dead_clients_reassign_tasks()
                 self.take_snapshot()
         except KeyboardInterrupt:
