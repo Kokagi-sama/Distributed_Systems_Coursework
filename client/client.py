@@ -1314,7 +1314,7 @@ class Client:
             # try:
             #     self._remove_alive_lock()
             # except Exception as e:
-            #     print(f"[{self.client_id}] Warning: Error removing alive lock: {e}")
+            #     print(f"[{self.client_id}] Error removing alive lock: {e}")
 
             print(f"[{self.client_id}] Stopped")
 
