@@ -23,6 +23,53 @@
 \thispagestyle{empty}
 \pagestyle{headings}
 
+
+\section{Executive Summary}
+
+This report presents the design and implementation of a fault-tolerant AFS Distributed File System for finding prime numbers in large datasets. The system uses a three-tier architecture in which coordinators and file servers are replicated, applies the Raft consensus algorithm for election of new leader file server, employs global snapshots for consistent state capture and crash recovery, and provides fault tolerance through multiple redundancy layers.
+
+System Scale: Multiple Workers, Replicated Coordinators (active-passive), and Replicated File Servers (leader-followers).
+
+Communication: gRPC protocol
+
+Key Algorithms: Global snapshots, Raft consensus, exponential backoff with failover
+
+\section{Failure Types Handled}
+
+Failure Type		Detection				        Recovery									    Guarantee
+Client Crash		Alive lock file on restart	    Global snapshot download + task resumption	    Eventually consistent
+Coordinator Crash	gRPC timeout		            Failover to secondary coordinator			    High availability
+FileServer Crash	gRPC timeout				    Raft leader election						    Linearizable consistency
+Network Partition	gRPC deadline exceeded	        Exponential backoff + retry					    Eventually consistent
+Data Corruption		Checksum mismatch		        Reject + retry download						    Strong integrity
+Task Failure		Client loses heartbeart	        Coordinator times out and reassigns task		At-least-once semantics
+
+\section{Assumptions}
+
+Network Assumptions:
+Eventual Connectivity:  Network partitions are transient
+Non-Byzantine:          No malicious actors (crash-fail model)
+Bounded Latency:        Sufficient gRPC timeouts (30-60 seconds)
+
+Timing Assumptions:
+Partially Synchronous:  Bounded message delays
+
+Storage Assumptions:
+Persistent Storage:     File servers have durable storage
+Atomic Rename:          POSIX-compliant file systems
+No Silent Corruption:   Disk errors
+
+Process Assumptions:
+Fail-Stop:              Processes crash cleanly (no stuck states)
+Independent Failures:   Worker crashes are uncorrelated
+
+\section{Limitations Not Handled}
+Byzantine Failures:                 Malicious clients/servers
+Network Delays > Timeout:           Premature timeouts treated as failures
+Concurrent Coordinator Failures:    Requires manual intervention
+File Server Quorum Loss:            System halts if > N/2 servers fail
+Disk Corruption:                    Silent data corruption not detected beyond checksums
+
 \section{System Model}
 
 This report explains the design for a distributed fault tolerant system that finds unique prime numbers and store them in a file server.
@@ -33,13 +80,13 @@ This report explains the design for a distributed fault tolerant system that fin
     \item \textbf{Core Components:}
           \begin{enumerate}
               \item \textbf{File Primary and Replicated Servers:} A replicated, high-availability file server based on the Raft consensus algorithm.
-              \item \textbf{Application Coordinator:} A central service that manages the task assignments, splits work, and handles failures.
-              \item \textbf{Application Worker:} A worker process that requests tasks from the Coordinator, performs computation, and interacts with the File Servers.
+              \item \textbf{Application Coordinators:} A central service that manages the task assignments, splits work, and triggers snapshots.
+              \item \textbf{Application Workers:} A Worker process that requests tasks from the Coordinator, performs computation, and interacts with the File Servers.
           \end{enumerate}
 \end{itemize}
 
 
-\section{AFS-Like Distributed File System}
+\section{AFS Distributed File System}
 
 The file system provides highly-available storage for input datasets and output results as shown in Figure (1).
 
