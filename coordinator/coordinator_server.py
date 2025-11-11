@@ -655,7 +655,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
             try:
                 with open(cached_path, 'r') as f:
                     snapshot_data = json.load(f)
-                    if snapshot_data.get("coordinator") != None or snapshot_data.get("coordinator") != {}:
+                    if snapshot_data.get("coordinator") != None and snapshot_data.get("coordinator") != {}:
 
                         print(
                             f"[Coordinator {self.server_id}] Successfully retrieved snapshot from file server at {fs_address}")
