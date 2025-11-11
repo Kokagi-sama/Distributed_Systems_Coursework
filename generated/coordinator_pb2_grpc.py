@@ -49,9 +49,9 @@ class CoordinatorStub(object):
                 request_serializer=coordinator__pb2.HeartbeatRequest.SerializeToString,
                 response_deserializer=coordinator__pb2.HeartbeatResponse.FromString,
                 _registered_method=True)
-        self.SubmitSnapshot = channel.stream_unary(
+        self.SubmitSnapshot = channel.unary_unary(
                 '/coordinator.Coordinator/SubmitSnapshot',
-                request_serializer=coordinator__pb2.SnapshotFileChunk.SerializeToString,
+                request_serializer=coordinator__pb2.SnapshotSubmissionRequest.SerializeToString,
                 response_deserializer=coordinator__pb2.SnapshotSubmissionResponse.FromString,
                 _registered_method=True)
 
@@ -77,7 +77,7 @@ class CoordinatorServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def SubmitSnapshot(self, request_iterator, context):
+    def SubmitSnapshot(self, request, context):
         """FOR SNAPSHOT:
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -102,9 +102,9 @@ def add_CoordinatorServicer_to_server(servicer, server):
                     request_deserializer=coordinator__pb2.HeartbeatRequest.FromString,
                     response_serializer=coordinator__pb2.HeartbeatResponse.SerializeToString,
             ),
-            'SubmitSnapshot': grpc.stream_unary_rpc_method_handler(
+            'SubmitSnapshot': grpc.unary_unary_rpc_method_handler(
                     servicer.SubmitSnapshot,
-                    request_deserializer=coordinator__pb2.SnapshotFileChunk.FromString,
+                    request_deserializer=coordinator__pb2.SnapshotSubmissionRequest.FromString,
                     response_serializer=coordinator__pb2.SnapshotSubmissionResponse.SerializeToString,
             ),
     }
@@ -200,7 +200,7 @@ class Coordinator(object):
             _registered_method=True)
 
     @staticmethod
-    def SubmitSnapshot(request_iterator,
+    def SubmitSnapshot(request,
             target,
             options=(),
             channel_credentials=None,
@@ -210,11 +210,11 @@ class Coordinator(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_unary(
-            request_iterator,
+        return grpc.experimental.unary_unary(
+            request,
             target,
             '/coordinator.Coordinator/SubmitSnapshot',
-            coordinator__pb2.SnapshotFileChunk.SerializeToString,
+            coordinator__pb2.SnapshotSubmissionRequest.SerializeToString,
             coordinator__pb2.SnapshotSubmissionResponse.FromString,
             options,
             channel_credentials,
