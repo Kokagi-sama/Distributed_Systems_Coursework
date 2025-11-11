@@ -156,7 +156,7 @@ class Client:
             state = {
                 "client_id": self.client_id,
                 "task_id": self.process_state.task_id,
-                "task_stage": self.process_state.task_stage.value,
+                "task_stage": self.process_state.task_stage.name,
                 "progress": self.process_state.progress_percentage,
                 "file": self.process_state.current_file,
             }
@@ -187,10 +187,10 @@ class Client:
             snapshot_data = {
                 "client_id": self.client_id,
                 "task_id": self.process_state.task_id,
-                "task_stage": self.process_state.task_stage.value,
+                "task_stage": self.process_state.task_stage.name,
                 "progress": self.process_state.progress_percentage,
                 "file": self.process_state.current_file,
-                "task_type": self.process_state.task_type.value,
+                "task_type": self.process_state.task_type.name,
                 "output_filename": self.process_state.output_filename,
                 "task_start_index": self.process_state.start_index,
                 "task_end_index": self.process_state.end_index,
@@ -266,13 +266,7 @@ class Client:
 
 
     def _check_and_recover_from_crash(self) -> bool:
-        """Check if alive lock file exists.
-        
-        - Upon fresh startup, client creates alive lock file
-        - When shutdown gracefully, alive lock file is deleted
-        - If alive lock file exists on startup -> client crashed (therefore did not clean up alive lock file)
-        - If no alive lock file, it means client has a fresh startup
-        """
+        """Check for alive lock file and recover if exist."""
         print(f"[{self.client_id}] ========== CHECKING IF CLIENT CRASHED ==========")
         
         if not self.alive_lock_file.exists():
@@ -345,18 +339,25 @@ class Client:
 
             # Get task stage/type
             try:
-                task_stage_str = snapshot_data.get('task_stage', 'IDLE')
-                self.process_state.task_stage = TaskStage(task_stage_str)
+                task_stage_value = snapshot_data.get('task_stage', 'IDLE')
+                # Handle both integer values (backward compatibility) and string names
+                if isinstance(task_stage_value, int):
+                    self.process_state.task_stage = TaskStage(task_stage_value)
+                else:
+                    self.process_state.task_stage = TaskStage[task_stage_value]
 
-                task_type_str = snapshot_data.get('task_type', 'IDLE')
-                self.process_state.task_type = TaskStage(task_type_str)
+                task_type_value = snapshot_data.get('task_type', 'IDLE')
+                if isinstance(task_type_value, int):
+                    self.process_state.task_type = TaskStage(task_type_value)
+                else:
+                    self.process_state.task_type = TaskStage[task_type_value]
 
-            except (ValueError, KeyError) as e:
-                print(f"[{self.client_id}] Warning: Invalid stage/type ({e}), resetting to IDLE")
+            except Exception:
+                print(f"[{self.client_id}] Warning: Invalid stage/type, will reset to IDLE")
                 self.process_state.task_stage = TaskStage.IDLE
                 self.process_state.task_type = TaskStage.IDLE
 
-            # Get start and end indices
+            # Retrieve start number line and end number line for processing
             start_index = snapshot_data.get('task_start_index', 0)
             end_index = snapshot_data.get('task_end_index', 0)
 
@@ -385,8 +386,19 @@ class Client:
             # Get progress
             progress = snapshot_data.get('progress', 0)
             if not isinstance(progress, int) or progress < 0 or progress > 100:
-                print(f"[{self.client_id}] Warning: Invalid progress ({progress}), clamping to [0, 100]")
-                progress = max(0, min(100, int(progress) if isinstance(progress, (int, float)) else 0))
+                print(f"[{self.client_id}] Warning: Progress should not be less than 0 or more than 100: {progress}")
+
+                # Convert to int, default to 0 if invalid type
+                if isinstance(progress, (int, float)):
+                    progress = int(progress)
+                else:
+                    progress = 0
+
+                # Clamp to valid range [0, 100]
+                if progress < 0:
+                    progress = 0
+                elif progress > 100:
+                    progress = 100
             self.process_state.progress_percentage = progress
 
             # Get current file
@@ -434,7 +446,7 @@ class Client:
         return addresses[(i + 1) % len(addresses)]
 
     def _compute_checksum(self, filepath: Path, chunk_size: int = 65536) -> str:
-        """Compute SHA-256 checksum of file with error handling."""
+        """Compute SHA-256 checksum of file."""
         try:
             sha256 = hashlib.sha256()
             with open(filepath, "rb") as f:
@@ -571,7 +583,6 @@ class Client:
                 continue
             
             finally:
-                # Always close the channel to prevent resource leaks
                 if fileserver_channel is not None:
                     try:
                         fileserver_channel.close()
@@ -729,7 +740,6 @@ class Client:
     ) -> tuple[bool, str]:
         """Process specific line range of file to find primes, deduplicate, and upload result."""
         try:
-            # Get input file
             filepath = self._fetch_file(filename)
         except Exception as e:
             print(f"[{self.client_id}] Error: {e}")
@@ -1037,7 +1047,7 @@ class Client:
                                     self.fileserver_addresses[0],
                                     False,
                                 )
-                            except (IndexError, ValueError) as e:
+                            except (ValueError, IndexError) as e:
                                 print(f"[{self.client_id}] Error: Invalid merge file format: {e}")
                                 print(f"[{self.client_id}] Cannot recover merge task, skipping")
                                 # Reset to IDLE and continue
@@ -1290,8 +1300,7 @@ class Client:
                     time.sleep(5)
 
         finally:
-            # Always cleanup, even if an exception occurs
-            # Each cleanup operation is wrapped to ensure all cleanup happens
+            # Clean up
             try:
                 self._stop_heartbeat()
             except Exception as e:

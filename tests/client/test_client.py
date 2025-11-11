@@ -1388,17 +1388,17 @@ def test_process_state_class_initialization():
 
 
 def test_task_stage_enum_values():
-    """Test TaskStage enum has all expected values."""
-    assert TaskStage.IDLE.value == "IDLE"
-    assert TaskStage.DOWNLOAD.value == "DOWNLOAD"
-    assert TaskStage.UPLOAD.value == "UPLOAD"
-    assert TaskStage.FIND_PRIMES.value == "FIND_PRIMES"
-    assert TaskStage.MERGE.value == "MERGE"
-    assert TaskStage.COMPLETED.value == "COMPLETED"
-    assert TaskStage.DOWNLOAD_ERROR.value == "DOWNLOAD_ERROR"
-    assert TaskStage.UPLOAD_ERROR.value == "UPLOAD_ERROR"
-    assert TaskStage.FIND_PRIMES_ERROR.value == "FIND_PRIMES_ERROR"
-    assert TaskStage.MERGE_ERROR.value == "MERGE_ERROR"
+    """Test TaskStage enum has all expected values aligned with coordinator.proto."""
+    assert TaskStage.IDLE.value == -1
+    assert TaskStage.DOWNLOAD.value == 2
+    assert TaskStage.UPLOAD.value == 3
+    assert TaskStage.FIND_PRIMES.value == 0  # Matches coordinator.proto TaskType
+    assert TaskStage.MERGE.value == 1  # Matches coordinator.proto TaskType
+    assert TaskStage.COMPLETED.value == 4
+    assert TaskStage.DOWNLOAD_ERROR.value == 5
+    assert TaskStage.UPLOAD_ERROR.value == 6
+    assert TaskStage.FIND_PRIMES_ERROR.value == 7
+    assert TaskStage.MERGE_ERROR.value == 8
 
 
 def test_rpc_type_enum_values():
@@ -1463,8 +1463,8 @@ def test_crash_detection_with_alive_lock(client, test_cache_dir):
             client.client_id: {
                 "client_id": client.client_id,
                 "task_id": "",
-                "task_stage": "IDLE",
-                "task_type": "IDLE",
+                "task_stage": -1,  # IDLE
+                "task_type": -1,  # IDLE
                 "progress": 0,
                 "file": "",
                 "task_start_index": 0,
@@ -1500,8 +1500,8 @@ def test_crash_recovery_merge_task_type_check(client, test_cache_dir):
             client.client_id: {
                 "client_id": client.client_id,
                 "task_id": "merge_123",
-                "task_stage": "DOWNLOAD",
-                "task_type": "MERGE",
+                "task_stage": 2,  # DOWNLOAD
+                "task_type": 1,  # MERGE
                 "progress": 50,
                 "file": "file1.txt,file2.txt",
                 "task_start_index": 0,
@@ -1562,8 +1562,8 @@ def test_crash_recovery_missing_end_index(client):
     """Test Bug #4: Handle missing end_index in snapshot with default value."""
     snapshot_data = {
         "task_id": "test_123",
-        "task_stage": "FIND_PRIMES",
-        "task_type": "FIND_PRIMES",
+        "task_stage": 0,  # FIND_PRIMES
+        "task_type": 0,  # FIND_PRIMES
         "progress": 50,
         "file": "test.txt",
         "task_start_index": 0,
@@ -1656,8 +1656,8 @@ def test_snapshot_restoration_with_all_fields(client):
     """Test complete snapshot restoration including new fields."""
     snapshot_data = {
         "task_id": "complete_123",
-        "task_stage": "UPLOAD",
-        "task_type": "FIND_PRIMES",
+        "task_stage": 3,  # UPLOAD
+        "task_type": 0,  # FIND_PRIMES
         "progress": 75,
         "file": "numbers.txt",
         "task_start_index": 100,
@@ -1754,7 +1754,7 @@ def test_snapshot_json_serialization(client):
     snapshot_data = {
         "client_id": client.client_id,
         "task_id": client.process_state.task_id,
-        "task_stage": client.process_state.task_stage.value,  # .value converts enum to string
+        "task_stage": client.process_state.task_stage.value,  # .value converts enum to integer
         "task_type": client.process_state.task_type.value,
         "progress": client.process_state.progress_percentage,
         "file": client.process_state.current_file,
@@ -1770,8 +1770,8 @@ def test_snapshot_json_serialization(client):
 
     # Verify can be deserialized
     parsed = json.loads(json_str)
-    assert parsed["task_stage"] == "FIND_PRIMES"
-    assert parsed["task_type"] == "FIND_PRIMES"
+    assert parsed["task_stage"] == 0  # FIND_PRIMES = 0
+    assert parsed["task_type"] == 0  # FIND_PRIMES = 0
 
 
 def test_alive_lock_cleanup_on_graceful_shutdown(client):
