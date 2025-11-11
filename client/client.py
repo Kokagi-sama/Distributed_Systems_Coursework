@@ -155,7 +155,7 @@ class Client:
                 "progress": self.process_state.progress_percentage,
                 "file": self.process_state.current_file,
             }
-        print(f"[{self.client_id}] SNAPSHOT: Started - {state}")
+            print(f"[{self.client_id}] SNAPSHOT: Started - {state}")
 
     def _record(self, msg_type, **data):
         """Record messages if snapshot active."""
@@ -715,11 +715,6 @@ class Client:
                 try:
                     num = int(line)
 
-                    # TODO: Remember to delete!!!!!!!!!!!!!!!!!!!
-                    # #======================================== DEBUG ========================================
-                    # print(f"Number line is {line_num}, number type is {type(num)}")
-                    # #======================================== DEBUG ========================================
-
                     if isprime(num):
                         primes.add(num)
                 except ValueError:
@@ -857,7 +852,8 @@ class Client:
                 # Handle snapshot trigger
                 if response.trigger_snapshot:
                     self._start_snapshot()
-                    self.snapshot_coordinator_address = address  # Set current coordinator's address for snapshot as this is the coordinator that client should send the snapshot back
+                    with self.snapshot_lock:
+                        self.snapshot_coordinator_address = address
 
                 # Handle snapshot marker
                 if response.snapshot_marker:
@@ -903,8 +899,19 @@ class Client:
         for address in self.coordinator_addresses:
             self._start_heartbeat(address)
 
-        # Try first coordinator initially
+        # Find first responsive coordinator or default to first
         current_coordinator = self.coordinator_addresses[0]
+        for address in self.coordinator_addresses:
+            try:
+                stub = self._get_coordinator_stub(address)
+                # Quick connectivity check with short timeout
+                stub.SendHeartbeat(coordinator_pb2.HeartbeatRequest(client_id=self.client_id), timeout=self.heartbeat_interval)
+                current_coordinator = address
+                print(f"[{self.client_id}] Connected to coordinator {address}")
+                break
+            except Exception:
+                # Try next coordinator
+                continue
 
         # Backoff settings for waiting and retries
         base_wait_time = 5
@@ -935,6 +942,7 @@ class Client:
             if task_stage != TaskStage.IDLE:
                 try:
                     start_time = time.time()
+                    # Initialise to False to ensure always defined
                     success = False
                     output_filename = ""
 
@@ -949,33 +957,33 @@ class Client:
                         )
                         elif task_type in (TaskStage.MERGE, TaskStage.MERGE_ERROR) and current_file:
                             print(f"[{self.client_id}] Restarting MERGE task from beginning")
-                            
+
                             try:
                                 files = current_file.split(',')
                                 if len(files) != 2:
                                     raise ValueError(f"Expected 2 files, got {len(files)}")
                                 file1, file2 = files[0], files[1]
+
+                                success, output_filename = self.merge_files(
+                                    file1,
+                                    file2,
+                                    task_id,
+                                    self.fileserver_addresses[0],
+                                    False,
+                                )
                             except (IndexError, ValueError) as e:
                                 print(f"[{self.client_id}] Error: Invalid merge file format: {e}")
+                                print(f"[{self.client_id}] Cannot recover merge task, skipping")
                                 # Reset to IDLE and continue
                                 with self.snapshot_lock:
                                     self.process_state.task_stage = TaskStage.IDLE
                                     self.process_state.task_type = TaskStage.IDLE
-                                    
-                            success, output_filename = self.merge_files(
-                                file1,
-                                file2,
-                                task_id,
-                                self.fileserver_addresses[0],
-                                False,
-                            )
+                                success = False
+                                output_filename = ""
                             
                         elapsed = time.time() - start_time
                         print(f"[{self.client_id}] Task completed in {elapsed:.2f}s")
-                        
-                        if success is None:
-                            success = False
-                        
+
                         if success:
                             print(f"[{self.client_id}] Updating task status to completed")
                             
@@ -1008,7 +1016,14 @@ class Client:
                     elif task_stage in (TaskStage.UPLOAD, TaskStage.UPLOAD_ERROR):
                         if output_filename_state:
                             path = self.cache_dir / output_filename_state
-                            success = self._upload_file(path, output_filename_state, self.fileserver_addresses[0])
+
+                            # Check if file exists before attempting re-upload
+                            if not path.exists():
+                                print(f"[{self.client_id}] Error: Output file {output_filename_state} not found in cache")
+                                print(f"[{self.client_id}] Cannot re-upload, task may need to be reprocessed")
+                                success = False
+                            else:
+                                success = self._upload_file(path, output_filename_state, self.fileserver_addresses[0])
                             
                             if success:
                                 print(f"[{self.client_id}] Re-upload successful, updating task status to completed")
@@ -1045,176 +1060,179 @@ class Client:
             print(f"[{self.client_id}] ================= CRASH RECOVERY COMPLETE ================")
             print(f"[{self.client_id}] ==========================================================")
         # ======================================================================
-        
-        while True:
-            try:
-                print(f"[{self.client_id}] Requesting task from {current_coordinator}")
 
-                coordinator_stub = self._get_coordinator_stub(current_coordinator)
-                request = coordinator_pb2.TaskRequest(client_id=self.client_id)
-                
-                # ============ SNAPSHOT ============
-                self._record(RpcType.REQUEST_TO_COORDINATOR_GET_TASK.value, client_id=self.client_id)
-                # ==================================
-                
-                task = coordinator_stub.RequestTask(request, timeout=30.0, wait_for_ready=True)
+        try:
+            while True:
+                try:
+                    print(f"[{self.client_id}] Requesting task from {current_coordinator}")
 
-                if not task.has_task:
-                    print(f"[{self.client_id}] Stopped: no tasks available")
-                    break
+                    coordinator_stub = self._get_coordinator_stub(current_coordinator)
+                    request = coordinator_pb2.TaskRequest(client_id=self.client_id)
 
-                if task.client_task_status == coordinator_pb2.WAIT:
-                    print(f"[{self.client_id}] Waiting for task dependencies")
-                    current_wait_time = self._apply_backoff(current_wait_time, max_wait_time)
-                    continue
-
-                # Got a task, reset backoff
-                current_wait_time = base_wait_time
-
-                print(f"[{self.client_id}] Received task from coordinator")
-                print(f"[{self.client_id}] Task type: {task.task_type}")
-                
-                # ============ SNAPSHOT ============
-                with self.snapshot_lock:
-                    self.process_state.task_id = task.task_id
-                self._record(RpcType.RESPONSE_FROM_COORDINATOR_GET_TASK.value, task_id=task.task_id, task_type=task.task_type)
-                # ==================================
-
-                start_time = time.time()
-                success = False
-                task_id = ""
-                output_filename = ""
-
-                if task.task_type == coordinator_pb2.FIND_PRIMES:
-                    print(f"[{self.client_id}] Task details:")
-                    print(f"[{self.client_id}]   Task ID: {task.task_id}")
-                    print(f"[{self.client_id}]   File: {task.filename}")
-                    print(f"[{self.client_id}]   Line range: {task.start_index} to {task.end_index - 1}")
-                    print(f"[{self.client_id}]   Primary server: {self.fileserver_addresses[0]}")
-
-                    # Set task_type for snapshot
-                    with self.snapshot_lock:
-                        self.process_state.task_type = TaskStage.FIND_PRIMES
-                        self.process_state.start_index = task.start_index
-                        self.process_state.end_index = task.end_index
-
-                    success, output_filename = self.process_file(
-                        task.filename,
-                        self.fileserver_addresses[0],
-                        task.start_index,
-                        task.end_index,
-                    )
-                    task_id = task.task_id
-
-                elif task.task_type == coordinator_pb2.MERGE:
-                    print(f"[{self.client_id}] Task details:")
-                    print(f"[{self.client_id}]   Task ID: {task.task_id}")
-                    print(f"[{self.client_id}]   File 1: {task.file1}")
-                    print(f"[{self.client_id}]   File 2: {task.file2}")
-                    print(f"[{self.client_id}]   Primary server: {self.fileserver_addresses[0]}")
-                    print(f"[{self.client_id}]   Last Task: {task.last_task}")
-
-                    # Set task_type for snapshot
-                    with self.snapshot_lock:
-                        self.process_state.task_type = TaskStage.MERGE
-
-                    success, output_filename = self.merge_files(
-                        task.file1,
-                        task.file2,
-                        task.task_id,
-                        self.fileserver_addresses[0],
-                        task.last_task,
-                    )
-                    task_id = task.task_id
-
-                elapsed = time.time() - start_time
-                print(f"[{self.client_id}] Task completed in {elapsed:.2f}s")
-                
-                # ============ SNAPSHOT ============
-                with self.snapshot_lock:
-                    self.process_state.task_stage = TaskStage.COMPLETED
-                    self.process_state.progress_percentage = 100
-                    self.process_state.current_file = ""
-                    self.process_state.output_filename = output_filename
-                # ==================================
-
-                # Update task status to completed
-                if success:
-                    print(f"[{self.client_id}] Updating task status to completed")
-                    
                     # ============ SNAPSHOT ============
-                    self._record(RpcType.REQUEST_TO_COORDINATOR_TASK_STATUS.value, task_id=task_id, output=output_filename)
-                    # ==================================
-                    
-                    status_request = coordinator_pb2.TaskStatusRequest(
-                        client_id=self.client_id,
-                        task_id=task_id,
-                        client_task_status=coordinator_pb2.COMPLETED,
-                        output_filename=output_filename,
-                    )
-                    response = coordinator_stub.UpdateTaskStatus(status_request)
-                    
-                    # ============ SNAPSHOT ============
-                    self._record(RpcType.RESPONSE_FROM_COORDINATOR_TASK_STATUS.value, task_id=task_id, output=output_filename)
+                    self._record(RpcType.REQUEST_TO_COORDINATOR_GET_TASK.value, client_id=self.client_id)
                     # ==================================
 
-                    if response.acknowledged:
-                        print(f"[{self.client_id}] Task status updated by coordinator")
-                        # Reset to IDLE after successful acknowledgment
+                    task = coordinator_stub.RequestTask(request, timeout=30.0, wait_for_ready=True)
+
+                    if not task.has_task:
+                        print(f"[{self.client_id}] Stopped: no tasks available")
+                        break
+
+                    if task.client_task_status == coordinator_pb2.WAIT:
+                        print(f"[{self.client_id}] Waiting for task dependencies")
+                        current_wait_time = self._apply_backoff(current_wait_time, max_wait_time)
+                        continue
+
+                    # Got a task, reset backoff
+                    current_wait_time = base_wait_time
+
+                    print(f"[{self.client_id}] Received task from coordinator")
+                    print(f"[{self.client_id}] Task type: {task.task_type}")
+
+                    # ============ SNAPSHOT ============
+                    with self.snapshot_lock:
+                        self.process_state.task_id = task.task_id
+                    self._record(RpcType.RESPONSE_FROM_COORDINATOR_GET_TASK.value, task_id=task.task_id, task_type=task.task_type)
+                    # ==================================
+
+                    start_time = time.time()
+                    success = False
+                    task_id = ""
+                    output_filename = ""
+
+                    if task.task_type == coordinator_pb2.FIND_PRIMES:
+                        print(f"[{self.client_id}] Task details:")
+                        print(f"[{self.client_id}]   Task ID: {task.task_id}")
+                        print(f"[{self.client_id}]   File: {task.filename}")
+                        print(f"[{self.client_id}]   Line range: {task.start_index} to {task.end_index - 1}")
+                        print(f"[{self.client_id}]   Primary server: {self.fileserver_addresses[0]}")
+
+                        # Set task_type for snapshot
+                        with self.snapshot_lock:
+                            self.process_state.task_type = TaskStage.FIND_PRIMES
+                            self.process_state.start_index = task.start_index
+                            self.process_state.end_index = task.end_index
+
+                        success, output_filename = self.process_file(
+                            task.filename,
+                            self.fileserver_addresses[0],
+                            task.start_index,
+                            task.end_index,
+                        )
+                        task_id = task.task_id
+
+                    elif task.task_type == coordinator_pb2.MERGE:
+                        print(f"[{self.client_id}] Task details:")
+                        print(f"[{self.client_id}]   Task ID: {task.task_id}")
+                        print(f"[{self.client_id}]   File 1: {task.file1}")
+                        print(f"[{self.client_id}]   File 2: {task.file2}")
+                        print(f"[{self.client_id}]   Primary server: {self.fileserver_addresses[0]}")
+                        print(f"[{self.client_id}]   Last Task: {task.last_task}")
+
+                        # Set task_type for snapshot
+                        with self.snapshot_lock:
+                            self.process_state.task_type = TaskStage.MERGE
+
+                        success, output_filename = self.merge_files(
+                            task.file1,
+                            task.file2,
+                            task.task_id,
+                            self.fileserver_addresses[0],
+                            task.last_task,
+                        )
+                        task_id = task.task_id
+
+                    elapsed = time.time() - start_time
+                    print(f"[{self.client_id}] Task completed in {elapsed:.2f}s")
+
+                    # ============ SNAPSHOT ============
+                    with self.snapshot_lock:
+                        self.process_state.task_stage = TaskStage.COMPLETED
+                        self.process_state.progress_percentage = 100
+                        self.process_state.current_file = ""
+                        self.process_state.output_filename = output_filename
+                    # ==================================
+
+                    # Update task status to completed
+                    if success:
+                        print(f"[{self.client_id}] Updating task status to completed")
+
+                        # ============ SNAPSHOT ============
+                        self._record(RpcType.REQUEST_TO_COORDINATOR_TASK_STATUS.value, task_id=task_id, output=output_filename)
+                        # ==================================
+
+                        status_request = coordinator_pb2.TaskStatusRequest(
+                            client_id=self.client_id,
+                            task_id=task_id,
+                            client_task_status=coordinator_pb2.COMPLETED,
+                            output_filename=output_filename,
+                        )
+                        response = coordinator_stub.UpdateTaskStatus(status_request)
+
+                        # ============ SNAPSHOT ============
+                        self._record(RpcType.RESPONSE_FROM_COORDINATOR_TASK_STATUS.value, task_id=task_id, output=output_filename)
+                        # ==================================
+
+                        if response.acknowledged:
+                            print(f"[{self.client_id}] Task status updated by coordinator")
+                            # Reset to IDLE after successful acknowledgment
+                            with self.snapshot_lock:
+                                self.process_state.task_stage = TaskStage.IDLE
+                                self.process_state.task_type = TaskStage.IDLE
+                                self.process_state.task_id = ""
+                                self.process_state.output_filename = ""
+                        else:
+                            print(f"[{self.client_id}] Warning: Task status not acknowledged by coordinator")
+                    else:
+                        print(f"[{self.client_id}] Task failed")
+                        print(f"[{self.client_id}] Not acknowledging failed task")
+
+                        # Reset state after failed task
                         with self.snapshot_lock:
                             self.process_state.task_stage = TaskStage.IDLE
                             self.process_state.task_type = TaskStage.IDLE
                             self.process_state.task_id = ""
+                            self.process_state.current_file = ""
                             self.process_state.output_filename = ""
-                    else:
-                        print(f"[{self.client_id}] Warning: Task status not acknowledged by coordinator")
-                else:
-                    print(f"[{self.client_id}] Task failed")
-                    print(f"[{self.client_id}] Not acknowledging failed task")
-                    
-                    # Reset state after failed task
+                            self.process_state.progress_percentage = 0
+
+                except KeyboardInterrupt:
+                    print(f"[{self.client_id}] Stopping")
+                    break
+                except grpc.RpcError as e:
+                    code = e.code().name if hasattr(e, "code") else "UNKNOWN"
+                    print(f"[{self.client_id}] RPC error: {code}, {e}")
+
+                    current_coordinator = self._next_coordinator(current_coordinator)
+                    print(f"[{self.client_id}] Trying another coordinator")
+                    current_wait_time = base_wait_time
+                    current_wait_time = self._apply_backoff(
+                        current_wait_time, max_wait_time
+                    )
+
+                    # ============ SNAPSHOT ============
+                    # Update task stage
                     with self.snapshot_lock:
                         self.process_state.task_stage = TaskStage.IDLE
-                        self.process_state.task_type = TaskStage.IDLE
-                        self.process_state.task_id = ""
-                        self.process_state.current_file = ""
-                        self.process_state.output_filename = ""
                         self.process_state.progress_percentage = 0
+                    # ==================================
 
-            except KeyboardInterrupt:
-                print(f"[{self.client_id}] Stopping")
-                break
-            except grpc.RpcError as e:
-                code = e.code().name if hasattr(e, "code") else "UNKNOWN"
-                print(f"[{self.client_id}] RPC error: {code}, {e}")
+                    continue
+                except Exception as e:
+                    print(f"[{self.client_id}] Error: {e}")
+                    time.sleep(5)
 
-                current_coordinator = self._next_coordinator(current_coordinator)
-                print(f"[{self.client_id}] Trying another coordinator")
-                current_wait_time = base_wait_time
-                current_wait_time = self._apply_backoff(
-                    current_wait_time, max_wait_time
-                )
+        finally:
+            # Always cleanup, even if an exception occurs
+            # Stop heartbeat thread
+            self._stop_heartbeat()
+            self._close_coordinator_channels()
 
-                # ============ SNAPSHOT ============
-                # Update task stage
-                with self.snapshot_lock:
-                    self.process_state.task_stage = TaskStage.IDLE
-                    self.process_state.progress_percentage = 0
-                # ==================================
-                
-                continue
-            except Exception as e:
-                print(f"[{self.client_id}] Error: {e}")
-                time.sleep(5)
+            # Remove alive lock file
+            self._remove_alive_lock()
 
-        # Stop heartbeat thread
-        self._stop_heartbeat()
-        self._close_coordinator_channels()
-        
-        # Remove alive lock file
-        self._remove_alive_lock()
-        
-        print(f"[{self.client_id}] Stopped")
+            print(f"[{self.client_id}] Stopped")
 
 
 def main():
