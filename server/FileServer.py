@@ -114,7 +114,9 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
         if self.temp_dir.exists(): shutil.rmtree(self.temp_dir)
         self.temp_dir.mkdir()
 
-        scan_dirs = [self.storage_dir, self.output_dir, self.snapshot_dir]
+        # --- 1. Scan for DYNAMIC files (Output and Snapshots) ---
+        # These have .meta files and are versioned
+        scan_dirs = [self.output_dir, self.snapshot_dir]
         for dir_path in scan_dirs:
             for entry in os.scandir(dir_path):
                 if entry.is_file() and entry.name.endswith(".meta"):
@@ -129,7 +131,37 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                                 self.max_version = meta['version']
                     except Exception as e:
                         print(f"[{self.server_id}] Corrupt metadata for {entry.name}: {e}")
-
+        
+        # --- 2. Scan for STATIC input files (in self.storage_dir) ---
+        # These are manually added, have no .meta, and are version 0
+        try:
+            for entry in os.scandir(self.storage_dir):
+                # Find files, but ignore .meta files in case any exist
+                if entry.is_file() and not entry.name.endswith(".meta"):
+                    filename = entry.name
+                    # Only add if not already in memory (e.g., if a file with
+                    # the same name was somehow in the output dir)
+                    if filename not in self.files:
+                        try:
+                            file_path = Path(entry.path)
+                            file_size = entry.stat().st_size
+                            # Note: This calculates checksum for all inputs at startup.
+                            # This is correct for AFS but can be slow if files are huge.
+                            file_checksum = self._calculate_file_checksum(file_path)
+                            
+                            self.files[filename] = {
+                                "size": file_size,
+                                "checksum": file_checksum,
+                                "version": 0  # Static input files are version 0
+                            }
+                            print(f"[{self.server_id}] Discovered static input file: {filename}")
+                        except Exception as e:
+                            print(f"[{self.server_id}] Failed to load static file {filename}: {e}")
+        except FileNotFoundError:
+            print(f"[{self.server_id}] WARN: Input directory {self.storage_dir} not found during scan.")
+        except Exception as e:
+            print(f"[{self.server_id}] ERROR: Failed to scan input dir {self.storage_dir}: {e}")
+            
     # ========================================================================
     # CLIENT-FACING RPCs
     # ========================================================================
@@ -192,7 +224,24 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
             meta = self.files.get(filename)
 
         if not meta:
-            if "snapshot.json" in filename:
+            # Check if it's a static file we missed on startup (fallback)
+            # This is less efficient but makes it robust if files are added manually *while running*
+            file_path_fallback = self.storage_dir / filename
+            if file_path_fallback.exists():
+                print(f"[{self.server_id}] WARN: {filename} not in memory, loading from static dir...")
+                try:
+                    file_size = file_path_fallback.stat().st_size
+                    file_checksum = self._calculate_file_checksum(file_path_fallback)
+                    meta = {"size": file_size, "checksum": file_checksum, "version": 0}
+                    with self.lock:
+                        self.files[filename] = meta # Cache it in memory now
+                except Exception as e:
+                    print(f"[{self.server_id}] ERROR: Failed fallback load of {filename}: {e}")
+                    context.abort(grpc.StatusCode.NOT_FOUND, "File not found")
+                    return
+            
+            # Handle special snapshot case
+            elif "snapshot.json" in filename:
                 print(f"[{self.server_id}] No {filename} found. Creating temp empty file to stream.")
                 empty_content = b"{}"
                 
@@ -223,6 +272,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 
                 return
             else:
+                # If it's not a snapshot and not a static file, it's truly not found
                 context.abort(grpc.StatusCode.NOT_FOUND, "File not found")
                 return
             
@@ -243,7 +293,7 @@ class FileServer(fileserver_pb2_grpc.FileServerServicer):
                 chunk = f.read(1024 * 1024)
                 if not chunk: break
                 yield fileserver_pb2.FileChunk(chunk_data=chunk)
-
+                
     # ========================================================================
     # REPLICATION SERVICES
     # ========================================================================
