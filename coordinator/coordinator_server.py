@@ -329,7 +329,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
             self.clients[client_id][2] = 0
 
     def check_dead_clients_reassign_tasks(self):
-        for client_id, (alive_status, last_heartbeat, assigned_task_id) in self.clients.items():
+        for client_id, (alive_status, last_heartbeat, assigned_task_id, snapshot_bool, snapshot_bool2) in self.clients.items():
             if ((time.time() - last_heartbeat > self.client_response_timeout) and alive_status):
                 # Mark client as dead
                 self.clients[client_id][0] = False
