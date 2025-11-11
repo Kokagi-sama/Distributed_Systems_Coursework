@@ -229,7 +229,9 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
                     self.result_filename = self.state['pending_de_duplication'][0]
                     print(
                         f"[Coordinator {self.server_id}] Processing complete. Final result file: {self.result_filename}")
-            return None
+                return None
+            else:
+                return None
 
             # In progress empty becuase not assigned yet. Only two current tasks should be there in the in-progress state
             if (self.state['pending_de_duplication'] == [] and
