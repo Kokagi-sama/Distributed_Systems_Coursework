@@ -507,7 +507,7 @@ class CoordinatorServer(coordinator_pb2_grpc.CoordinatorServicer,
         print(
             f"[Coordinator {self.server_id}] Waiting for client snapshots...")
         while not all(self.snapshot_tracker.values()):
-            if time.time() - snapshot_start_time > snapshot_timeout:
+            if ((time.time() - snapshot_start_time) > snapshot_timeout):
                 print(
                     f"[Coordinator {self.server_id}] Snapshot timed out. Proceeding with available data.")
                 break
