@@ -38,17 +38,33 @@ To modify ports, edit the respective batch files in the `scripts/` folder:
 - [scripts/coordinator.bat](scripts/coordinator.bat) - Update `COORD1_PORT`, `COORD2_PORT`, and `FILESERVERS` variables
 - [scripts/worker.bat](scripts/worker.bat) - Update `COORDINATORS` and `FILESERVERS` variables
 
-Ensure all components reference the correct ports when making changes.
+Ensure all components reference the correct address and ports when making changes.
 
 ## Running the System
-1. Start the File Servers
-scripts\fileserver.bat
+1. Prepare the File List
+   - Create a `file_list.csv` file in the `coordinator/` folder
+   - Format: `file_name,no_of_nums` (one file per line)
+   - Example:
+     ```
+     file_name,no_of_nums
+     data_input_001.txt,1000
+     data_input_002.txt,2000
+     ```
 
-2. Start the Coordinators
-scripts\coordinator.bat
+2. Start the File Servers
+   ```
+   scripts\fileserver.bat
+   ```
 
-3. Run Workers
-scripts\worker.bat
+3. Start the Coordinators
+   ```
+   scripts\coordinator.bat
+   ```
+
+4. Run Workers
+   ```
+   scripts\worker.bat
+   ```
 
 ## Project Structure
 ├── client/           # Worker implementation
