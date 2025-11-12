@@ -25,6 +25,9 @@ python -m grpc_tools.protoc -I. --python_out=generated --grpc_python_out=generat
 
 ## Configuration
 
+### Default IP Addresses
+Runs on localhost by default. To modify address, edit the respective localhost to the IP Address needed
+
 ### Default Ports
 - **File Servers**: 50051, 50052, 50053
 - **Coordinators**: 50054, 50055
