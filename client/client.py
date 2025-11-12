@@ -290,31 +290,32 @@ class Client:
         """Download snapshot from fileserver and restore state."""
         snapshot_filename = "snapshot.json"
         try:
-            # Download snapshot.json
+            # Download snapshot.json (marked as optional so it fails fast if not found)
             print(f"[{self.client_id}] Downloading snapshot.json...")
-            snapshot_path = self._fetch_file(snapshot_filename)
+            snapshot_path = self._fetch_file(snapshot_filename, optional = True)
 
             with open(snapshot_path, 'r') as f:
                 global_snapshot = json.load(f)
-        
+
             # Get snapshot data
             client_snapshot = global_snapshot.get('clients', {}).get(self.client_id)
-            
+
             if not client_snapshot:
-                print(f"[{self.client_id}] No snapshot file found")
+                print(f"[{self.client_id}] No snapshot data found for this client")
                 print(f"[{self.client_id}] Starting fresh")
                 return False
-            
+
             print(f"[{self.client_id}] Found snapshot data")
             self._restore_from_snapshot(client_snapshot)
             return True
-            
+
         except FileNotFoundError:
-            print(f"[{self.client_id}] No snapshot file found")
+            print(f"[{self.client_id}] No snapshot file found on any file server")
             print(f"[{self.client_id}] Starting fresh")
             return False
+        
         except Exception as e:
-            print(f"[{self.client_id}] Error recovering from snapshot")
+            print(f"[{self.client_id}] Error recovering from snapshot: {e}")
             print(f"[{self.client_id}] Starting fresh")
             return False
 
@@ -518,51 +519,66 @@ class Client:
                     pass
             raise e
 
-    def _fetch_file(self, filename: str) -> Path:
-        """Fetch file from file server with random selection and failover."""
+    def _fetch_file(self, filename: str, optional: bool = False, max_retries: int = None) -> Path:
+        """Fetch file from file server with random selection and failover.
+        
+        Args:
+            filename: Name of file to fetch
+            optional: If True, raise FileNotFoundError after checking all servers once instead of retrying indefinitely
+            max_retries: Maximum number of retry attempts. If None, retry indefinitely (unless optional = True)
+            
+        Returns:
+            Path to cached file
+            
+        Raises:
+            FileNotFoundError: If optional = True and file not found on any server
+            RuntimeError: For other fatal errors
+        """
         # Check if file exists on disk
         local_path = self.cache_dir / Path(filename).name
         if local_path.exists():
             print(f"[{self.client_id}] Using local {filename}")
             return local_path
-
+        
         retry_count = 0
         while True:
             servers = self.fileserver_addresses.copy()
             random.shuffle(servers)
-
+            
             last_error = None
+            file_not_found_count = 0  # Track how many servers report file not found
+            
             for fileserver_address in servers:
                 fileserver_channel = None
                 try:
                     print(f"[{self.client_id}] Fetching {filename} from {fileserver_address}")
-
+                    
                     # ============ SNAPSHOT ============
                     # Record right before firing request
                     self._record(RpcType.REQUEST_TO_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
-
+                    
                     # Update task stage and start with 0 progress
                     with self.snapshot_lock:
                         self.process_state.task_stage = TaskStage.DOWNLOAD
                         self.process_state.progress_percentage = 0
                         self.process_state.current_file = filename
                     # ==================================
-
+                    
                     fileserver_channel = grpc.insecure_channel(fileserver_address)
                     fileserver_stub = fileserver_pb2_grpc.FileServerStub(fileserver_channel)
-
+                    
                     request = fileserver_pb2.FetchRequest(filename=filename)
                     chunk_stream = fileserver_stub.FetchFile(request)
-
+                    
                     # Save to local cache
                     cached_path = self.cache_dir / Path(filename).name
                     server_checksum = self._stream_fetch(chunk_stream, cached_path)
-
+                    
                     # ============ SNAPSHOT ============
                     # Record AFTER successfully receiving all chunks from fileserver
                     self._record(RpcType.RESPONSE_FROM_FILESERVER_DOWNLOAD.value, file=filename, server=fileserver_address)
                     # ==================================
-
+                    
                     # Verify checksum if provided by server
                     if server_checksum:
                         computed_checksum = self._compute_checksum(cached_path)
@@ -571,36 +587,63 @@ class Client:
                             cached_path.unlink()
                             raise RuntimeError(f"Checksum verification failed for {filename}: expected {server_checksum}, got {computed_checksum}")
                         print(f"[{self.client_id}] Successfully verified checksum for {filename}")
-
+                        
                     print(f"[{self.client_id}] Successfully fetched {filename} from {fileserver_address}")
                     print(f"[{self.client_id}] Cached {filename} locally")
-
+                    
                     # ============ SNAPSHOT ============
                     # Update progress to 100
                     with self.snapshot_lock:
                         self.process_state.progress_percentage = 100
                     # ==================================
-
+                    
                     return cached_path
-
-                except Exception as e:
-                    print(f"[{self.client_id}] Failed to fetch from {fileserver_address}")
+                
+                except grpc.RpcError as e:
+                    # Check if this is a NOT_FOUND error
+                    if hasattr(e, 'code') and e.code() == grpc.StatusCode.NOT_FOUND:
+                        file_not_found_count += 1
+                        print(f"[{self.client_id}] File {filename} not found on {fileserver_address}")
+                    else:
+                        print(f"[{self.client_id}] Failed to fetch from {fileserver_address}: {e}")
                     last_error = e
-
+                    
                     # ============ SNAPSHOT ============
                     with self.snapshot_lock:
                         self.process_state.task_stage = TaskStage.DOWNLOAD_ERROR
                         self.process_state.progress_percentage = 0
                     # ==================================
-
+                    
                     continue
-
+                
+                except Exception as e:
+                    print(f"[{self.client_id}] Failed to fetch from {fileserver_address}")
+                    last_error = e
+                    
+                    # ============ SNAPSHOT ============
+                    with self.snapshot_lock:
+                        self.process_state.task_stage = TaskStage.DOWNLOAD_ERROR
+                        self.process_state.progress_percentage = 0
+                    # ==================================
+                    
+                    continue
+                
                 finally:
                     if fileserver_channel is not None:
                         try:
                             fileserver_channel.close()
                         except Exception:
                             pass
+
+            # If optional file and all servers report NOT_FOUND, raise FileNotFoundError
+            if optional and file_not_found_count == len(servers):
+                print(f"[{self.client_id}] Optional file {filename} not found on any server")
+                raise FileNotFoundError(f"File {filename} not found on any file server")
+
+            # Check if max retries reached
+            if max_retries is not None and retry_count >= max_retries:
+                print(f"[{self.client_id}] Max retries ({max_retries}) reached for {filename}")
+                raise RuntimeError(f"Failed to fetch {filename} after {max_retries} attempts")
 
             # Avoid spamming, exponential backoff after failing to fetch from all servers failed this round
             retry_count += 1
