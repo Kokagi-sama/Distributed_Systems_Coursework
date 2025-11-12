@@ -1,1 +1,55 @@
-# Distributed_Systems_Coursework
+# Distributed Systems Coursework
+
+## Overview
+A distributed AFS system with coordinator-based replication and task management.
+
+## Architecture
+- **File Server**: Handles file storage and retrieval
+- **Coordinator**: Manages worker registration and tasks coordination
+- **Worker**: Interacts with file server and coordinator for finding unique prime numbers
+
+## Prerequisites
+- Python 3
+- gRPC
+
+## Installation
+```bash
+# Install required packages
+pip install grpcio grpcio-tools
+```
+
+If the `generated/` folder is empty or you need to regenerate gRPC code from proto files:
+```bash
+python -m grpc_tools.protoc -I. --python_out=generated --grpc_python_out=generated *.proto
+```
+
+## Configuration
+
+### Default Ports
+- **File Servers**: 50051, 50052, 50053
+- **Coordinators**: 50054, 50055
+
+### Customising Ports
+To modify ports, edit the respective batch files in the `scripts/` folder:
+- [scripts/fileserver.bat](scripts/fileserver.bat) - Update `--port` arguments
+- [scripts/coordinator.bat](scripts/coordinator.bat) - Update `COORD1_PORT`, `COORD2_PORT`, and `FILESERVERS` variables
+- [scripts/worker.bat](scripts/worker.bat) - Update `COORDINATORS` and `FILESERVERS` variables
+
+Ensure all components reference the correct ports when making changes.
+
+## Running the System
+1. Start the File Servers
+scripts\fileserver.bat
+
+2. Start the Coordinators
+scripts\coordinator.bat
+
+3. Run Workers
+scripts\worker.bat
+
+## Project Structure
+├── client/           # Worker implementation
+├── coordinator/      # Coordinator implementation
+├── fileserver/       # File server implementation
+├── generated/        # Auto-generated gRPC code
+└── scripts/          # Startup scripts
