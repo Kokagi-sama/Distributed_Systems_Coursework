@@ -9,7 +9,7 @@ A distributed AFS system with coordinator-based replication and task management.
 - **Worker**: Interacts with file server and coordinator for finding unique prime numbers
 
 ## Prerequisites
-- Python 3
+- Python 3.11
 - gRPC
 
 ## Installation
