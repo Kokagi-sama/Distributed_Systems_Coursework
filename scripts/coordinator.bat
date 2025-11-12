@@ -3,8 +3,8 @@ REM This script starts two coordinator servers for a primary-replica setup.
 
 REM Define common variables
 SET PYTHON_EXE=python
-SET SCRIPT_PATH=coordinator\coordinator_server.py
-SET FILE_LIST=coordinator\file_list.csv
+SET SCRIPT_PATH=..\coordinator\coordinator_server.py
+SET FILE_LIST=..\coordinator\file_list.csv
 SET FILESERVERS=localhost:50051 localhost:50052 localhost:50053
 SET SNAPSHOT_INTERVAL=60
 SET TIMEOUT=10

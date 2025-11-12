@@ -26,7 +26,7 @@ from generated import (
 # =============================== SNAPSHOT ===============================
 # Simply client-end snapshot implementation.
 # Upon trigger from coordinator received via heartbeat response, client captures the process states and starts channel recording.
-# Channel recording takes a simplistic approach in recording before the request is sent and after the response is received rather than monitoring and intercepting rpc calls - since client dont ever receive rpc requests in this design. This is to simulate the idea of capturing in flight calls - you get the idea :)
+# Channel recording takes a simplistic approach in recording before the request is sent and after the response is received rather than monitoring and intercepting rpc calls.
 # Upon receiving snapshot marker via heartbeat response from coordinator, client stops channel recording.
 # Client then sends the full snapshot - process states + channel states to coordinator.
 # This completes the snapshot process at the client's end.
@@ -35,7 +35,7 @@ from generated import (
 class TaskStage(Enum):
     """Enums for stages of task used for client's state to facilitate snapshot.
 
-    Note: FIND_PRIMES and MERGE values align with coordinator.proto TaskType enum.
+    Overloading for task type enum - IDLE, FIND_PRIMES, and MERGE
     """
     IDLE = -1
     DOWNLOAD = 2
@@ -73,6 +73,7 @@ class ProcessState:
         """Initialise the states.
 
         Progress percentage refers to the progress for that particular stage of the task. It DOES NOT represent the progress of the whole task. E.g., if task_stage="FIND_PRIMES", progress_percentage=60 means the process of "finding primes" is at 60%.
+        
         COMPLETED will always be 100%; IDLE will always be 0%.
         """
         self.task_id: str = ""
@@ -207,10 +208,7 @@ class Client:
         self._submit_snapshot_to_coordinator(snapshot_data)
 
     def _submit_snapshot_to_coordinator(self, snapshot_data: dict):
-        """Client submits snapshot to coordinator.
-
-        Coordinator will compile all client snapshots into snapshot.json and upload to fileserver.
-        """
+        """Send snapshot to coordinator."""
 
         # Serialise the whole snapshot data to a JSON string
         snapshot_json = json.dumps(snapshot_data, indent=2)
@@ -241,6 +239,8 @@ class Client:
 
     # =============================== CRASH RECOVERY===============================
     # Simple crash detection - if lock file exists on startup = crashed
+    
+    
     def _generate_alive_lock(self):
         """Generates alive lock file to indicate client is running.
 
@@ -301,7 +301,7 @@ class Client:
             client_snapshot = global_snapshot.get('clients', {}).get(self.client_id)
             
             if not client_snapshot:
-                print(f"[{self.client_id}] No snapshot found")
+                print(f"[{self.client_id}] No snapshot file found")
                 print(f"[{self.client_id}] Starting fresh")
                 return False
             
@@ -314,7 +314,7 @@ class Client:
             print(f"[{self.client_id}] Starting fresh")
             return False
         except Exception as e:
-            print(f"[{self.client_id}] Error recovering from snapshot: {e}")
+            print(f"[{self.client_id}] Error recovering from snapshot")
             print(f"[{self.client_id}] Starting fresh")
             return False
 
