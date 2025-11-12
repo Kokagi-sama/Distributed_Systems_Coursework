@@ -12,6 +12,7 @@ REM Set your coordinator and fileserver addresses here
 set COORDINATORS=localhost:50054 localhost:50055
 set FILESERVERS=localhost:50051 localhost:50052 localhost:50053
 
+REM To add more workers, copy the "Worker" command and rename to a different ID
 echo Starting 4 client instances...
 echo.
 
