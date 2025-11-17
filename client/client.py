@@ -505,8 +505,8 @@ class Client:
             print(f"[DEBUG] Finished receiving {output_path.name}: {chunks_received} chunks, {bytes_written} bytes")
 
             # Check if we actually received any data
-            if bytes_written == 0:
-                raise RuntimeError(f"Received empty file for {output_path.name} (0 bytes written)")
+            # if bytes_written == 0:
+            #     raise RuntimeError(f"Received empty file for {output_path.name} (0 bytes written)")
 
             tmp_path.replace(output_path)
             return server_checksum
@@ -825,8 +825,12 @@ class Client:
         # Find and deduplicate primes
         primes = set()
 
-        with open(filepath, "r") as f:
-            for line_num, line in enumerate(f):
+        result_filename = (f"{Path(filename).stem}_range_{start_index}_{end_index}_primes.txt")
+        result_path = self.cache_dir / result_filename
+        tmp_path = Path(str(result_path) + ".tmp")
+
+        with open(filepath, "r") as f1, open(tmp_path, "w") as f2:
+            for line_num, line in enumerate(f1):
                 # Skip lines before start_index
                 if line_num < start_index:
                     continue
@@ -850,8 +854,13 @@ class Client:
                 try:
                     num = int(line)
                     
-                    if isprime(num):
+                    # TODO: 0.002 seconds of wait equals 6.2 minutes for 186,000 numbers
+                    # Assume 7.36 MB file across 4 workers
+                    
+                    if isprime(num) and num not in primes:
+                        time.sleep(0.004)
                         primes.add(num)
+                        f2.write(f"{num}\n")
                 except ValueError:
                     print(f"[{self.client_id}] Warning: Invalid number on line {line_num + 1}: {line}")
                     continue
@@ -859,14 +868,14 @@ class Client:
         print(f"[{self.client_id}] Finished processing {filename}: found {len(primes):,} unique primes from line {start_index} to {end_index - 1}")
         
         # Write sorted primes atomically
-        result_filename = (f"{Path(filename).stem}_range_{start_index}_{end_index}_primes.txt")
-        result_path = self.cache_dir / result_filename
-        tmp_path = Path(str(result_path) + ".tmp")
+        # result_filename = (f"{Path(filename).stem}_range_{start_index}_{end_index}_primes.txt")
+        # result_path = self.cache_dir / result_filename
+        # tmp_path = Path(str(result_path) + ".tmp")
         
         try:
-            with open(tmp_path, "w") as f:
-                for prime in sorted(primes):
-                    f.write(f"{prime}\n")
+            # with open(tmp_path, "w") as f:
+            #     for prime in sorted(primes):
+            #         f.write(f"{prime}\n")
                     
             tmp_path.replace(result_path)
             print(f"[{self.client_id}] Wrote deduplicated primes to {result_filename}")
