@@ -1005,8 +1005,9 @@ class Client:
                 # ==================================
                 
             except grpc.RpcError as e:
-                print(f"[{self.client_id}] Heartbeat error to {address}")
-                pass
+                if address != "localhost:50055":
+                    print(f"[{self.client_id}] Heartbeat error to {address}")
+                    pass
                 
             time.sleep(self.heartbeat_interval)
 
