@@ -67,6 +67,7 @@ Ensure all components reference the correct address and ports when making change
    ```
 
 ## Project Structure
+```text
 ├── client/           # Worker implementation
 ├── coordinator/      # Coordinator implementation
 ├── fileserver/       # File server implementation
